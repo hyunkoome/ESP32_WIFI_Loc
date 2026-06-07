@@ -113,6 +113,8 @@ def read_diagnostics(
         "chip": None,
         "led": None,
         "button": None,
+        "temp": None,
+        "gpio": None,
         "done": False,
         "error": None,
         "raw": "",
@@ -139,7 +141,7 @@ def read_diagnostics(
             # 새 사이클 시작: 이전(부분) 사이클 결과를 초기화하고 수집을 다시 시작.
             if line.startswith("DIAG_START"):
                 saw_start = True
-                for field in ("psram", "wifi", "chip", "led", "button"):
+                for field in ("psram", "wifi", "chip", "led", "button", "temp", "gpio"):
                     result[field] = None
                 continue
             # "DIAG_KEY {json}" 형태만 처리.
@@ -149,6 +151,8 @@ def read_diagnostics(
                 ("DIAG_CHIP", "chip"),
                 ("DIAG_LED", "led"),
                 ("DIAG_BUTTON", "button"),
+                ("DIAG_TEMP", "temp"),
+                ("DIAG_GPIO", "gpio"),
             ):
                 if line.startswith(key):
                     payload = line[len(key):].strip()
@@ -161,7 +165,7 @@ def read_diagnostics(
                 result["done"] = True
                 break
         if not result["done"] and not any(
-            result[k] for k in ("psram", "wifi", "chip", "led", "button")
+            result[k] for k in ("psram", "wifi", "chip", "led", "button", "temp", "gpio")
         ):
             result["error"] = (
                 "펌웨어 출력(DIAG_*)을 받지 못했습니다. "
@@ -194,6 +198,8 @@ def run_firmware_diagnostics(port: str, use_sudo: bool = False) -> Dict[str, obj
             "chip": None,
             "led": None,
             "button": None,
+            "temp": None,
+            "gpio": None,
             "done": False,
             "error": flash_res["error"],
             "raw": "",

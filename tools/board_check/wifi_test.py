@@ -20,6 +20,24 @@ from typing import Dict, Optional
 import config
 
 
+def _rssi_bar(rssi: Optional[int]) -> str:
+    """RSSI(dBm)를 4칸 신호 막대로 시각화. 강할수록 채워진 칸이 많다."""
+    if rssi is None:
+        return "[????]"
+    # 대략적 기준: >=-50 매우강, -60 강, -70 보통, -80 약, 그 이하 매우약.
+    if rssi >= -50:
+        level = 4
+    elif rssi >= -60:
+        level = 3
+    elif rssi >= -70:
+        level = 2
+    elif rssi >= -80:
+        level = 1
+    else:
+        level = 0
+    return "[" + "█" * level + "·" * (4 - level) + "]"
+
+
 def evaluate_wifi(
     firmware_diag: Optional[Dict[str, object]], min_ap: int = 1
 ) -> Dict[str, object]:
@@ -40,6 +58,8 @@ def evaluate_wifi(
         "status": config.STATUS_SKIP,
         "ap_count": None,
         "strongest_rssi": None,
+        "aps": [],
+        "sublist": [],
         "detail": "",
     }
 
@@ -62,6 +82,23 @@ def evaluate_wifi(
     rssi = wifi.get("strongest_rssi")
     result["ap_count"] = ap_count
     result["strongest_rssi"] = rssi
+
+    # 펌웨어가 보낸 AP 목록(ssid/rssi/ch)을 RSSI 강한 순으로 정렬해 표시용 리스트 구성.
+    aps = wifi.get("aps") or []
+    if isinstance(aps, list) and aps:
+        aps_sorted = sorted(
+            aps, key=lambda a: a.get("rssi", -999), reverse=True
+        )
+        result["aps"] = aps_sorted
+        sublist = []
+        for a in aps_sorted:
+            ssid = a.get("ssid") or "<숨김/빈 SSID>"
+            ar = a.get("rssi")
+            ch = a.get("ch")
+            bar = _rssi_bar(ar)
+            sublist.append(f"{bar} {str(ssid)[:32]:<32} {ar:>4} dBm  ch{ch}")
+        result["sublist"] = sublist
+
     if ap_count >= min_ap:
         result["status"] = config.STATUS_PASS
         rssi_txt = f", 최강 RSSI {rssi} dBm" if rssi is not None else ""

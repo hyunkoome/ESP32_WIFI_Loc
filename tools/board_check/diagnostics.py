@@ -234,6 +234,26 @@ def diagnose_board(
         wifi_res["detail"],
         ap_count=wifi_res.get("ap_count"),
         strongest_rssi=wifi_res.get("strongest_rssi"),
+        aps=wifi_res.get("aps"),
+        sublist=wifi_res.get("sublist"),
+    )
+
+    # 6-3) 내장 온도센서 / GPIO 일괄 점검 — 진단 펌웨어 기반(옵션).
+    temp_res = peripheral_test.evaluate_temp(fw_diag if use_firmware else None)
+    checks["temperature"] = _check(
+        temp_res["status"],
+        temp_res["detail"],
+        celsius=temp_res.get("celsius"),
+    )
+
+    gpio_res = peripheral_test.evaluate_gpio(fw_diag if use_firmware else None)
+    checks["gpio"] = _check(
+        gpio_res["status"],
+        gpio_res["detail"],
+        tested=gpio_res.get("tested"),
+        passed=gpio_res.get("passed"),
+        failed=gpio_res.get("failed"),
+        sublist=gpio_res.get("sublist"),
     )
 
     # ---------------------------------------------------------------
@@ -252,9 +272,10 @@ def diagnose_board(
         if checks.get(key, {}).get("status") == config.STATUS_FAIL:
             overall = config.STATUS_FAIL
             break
-    # 펌웨어를 사용했는데 PSRAM/LED/버튼/WiFi가 FAIL이면 전체도 FAIL로 격상.
+    # 펌웨어를 사용했는데 PSRAM/LED/버튼/WiFi/온도가 FAIL이면 전체도 FAIL로 격상.
+    # (GPIO 는 외부 배선 연결 핀이 오탐될 수 있어 SKIP 로 두고 격상 대상에서 제외.)
     if use_firmware:
-        for key in ("psram", "rgb_led", "boot_button", "wifi_scan"):
+        for key in ("psram", "rgb_led", "boot_button", "wifi_scan", "temperature"):
             if checks.get(key, {}).get("status") == config.STATUS_FAIL:
                 overall = config.STATUS_FAIL
                 break

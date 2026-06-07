@@ -31,6 +31,7 @@
 #include "freertos/task.h"
 
 #include "driver/gpio.h"
+#include "driver/temperature_sensor.h"
 #include "esp_chip_info.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
@@ -187,8 +188,28 @@ static void report_button(char *out, size_t n)
              idle, pressed ? "true" : "false", BOOT_BUTTON_GPIO);
 }
 
+/* JSON 문자열 값에 안전하도록 ", \\, 제어문자를 이스케이프해 dst 로 복사한다.
+ * (WiFi SSID 등 외부 문자열을 JSON 으로 내보낼 때 사용.) */
+static void json_escape(const char *src, char *dst, size_t dst_n)
+{
+    size_t j = 0;
+    for (size_t i = 0; src[i] != '\0' && j + 2 < dst_n; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (c == '"' || c == '\\') {
+            dst[j++] = '\\';
+            dst[j++] = (char)c;
+        } else if (c < 0x20) {
+            dst[j++] = ' ';  /* 제어문자는 공백으로 단순 치환 */
+        } else {
+            dst[j++] = (char)c;
+        }
+    }
+    dst[j] = '\0';
+}
+
 /* ----------------------------------------------------------------------- */
 /* WiFi AP 스캔                                                            */
+/*  - 전 채널 스캔 후 요약(개수/최강 RSSI)과 AP 목록(ssid/rssi/채널)을 출력.*/
 /* ----------------------------------------------------------------------- */
 static void report_wifi(char *out, size_t n)
 {
@@ -230,19 +251,133 @@ static void report_wifi(char *out, size_t n)
         }
     }
 
-    /* DIAG_WIFI {"ap_count":15,"strongest_rssi":-42} */
+    /* DIAG_WIFI {"ap_count":15,"strongest_rssi":-42,
+     *            "aps":[{"ssid":"AP","rssi":-42,"ch":6}, ...]} */
+    int off = snprintf(out, n, "DIAG_WIFI {\"ap_count\":%d,", ap_count);
     if (have_rssi) {
-        snprintf(out, n, "DIAG_WIFI {\"ap_count\":%d,\"strongest_rssi\":%d}",
-                 ap_count, strongest);
+        off += snprintf(out + off, (off < (int)n) ? n - off : 0,
+                        "\"strongest_rssi\":%d,\"aps\":[", strongest);
     } else {
-        snprintf(out, n, "DIAG_WIFI {\"ap_count\":%d,\"strongest_rssi\":null}", ap_count);
+        off += snprintf(out + off, (off < (int)n) ? n - off : 0,
+                        "\"strongest_rssi\":null,\"aps\":[");
     }
+    for (int i = 0; i < num; i++) {
+        char ssid_esc[80];
+        json_escape((const char *)records[i].ssid, ssid_esc, sizeof(ssid_esc));
+        off += snprintf(out + off, (off < (int)n) ? n - off : 0,
+                        "%s{\"ssid\":\"%s\",\"rssi\":%d,\"ch\":%d}",
+                        i ? "," : "", ssid_esc, records[i].rssi, records[i].primary);
+        if (off >= (int)n - 4) { break; }  /* 버퍼 한계 방지(이후 AP 생략) */
+    }
+    snprintf(out + off, (off < (int)n) ? n - off : 0, "]}");
     return;
 
 fail:
     ESP_LOGE(TAG, "WiFi scan failed: %s", esp_err_to_name(err));
     snprintf(out, n, "DIAG_WIFI {\"ap_count\":0,\"strongest_rssi\":null,\"error\":\"%s\"}",
              esp_err_to_name(err));
+}
+
+/* ----------------------------------------------------------------------- */
+/* 내장 온도센서                                                           */
+/*  - ESP32-S3 내장 temperature sensor 를 설치/활성화해 칩 온도를 읽는다.  */
+/*  - 동작 자체(설치+읽기 성공) 확인이 목적. 절대값은 칩 다이 온도라 실온  */
+/*    보다 높게(보통 30~50도) 나오는 게 정상.                              */
+/* ----------------------------------------------------------------------- */
+static void report_temp(char *out, size_t n)
+{
+    int ok = 0;
+    float celsius = 0.0f;
+
+    temperature_sensor_handle_t ts = NULL;
+    /* 측정 범위 10~80도(센서가 자동으로 적절한 레인지를 고른다). */
+    temperature_sensor_config_t ts_cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 80);
+
+    esp_err_t err = temperature_sensor_install(&ts_cfg, &ts);
+    if (err == ESP_OK) {
+        err = temperature_sensor_enable(ts);
+    }
+    if (err == ESP_OK) {
+        err = temperature_sensor_get_celsius(ts, &celsius);
+        if (err == ESP_OK) {
+            ok = 1;
+        }
+    }
+    if (ts != NULL) {
+        temperature_sensor_disable(ts);
+        temperature_sensor_uninstall(ts);
+    }
+
+    if (ok) {
+        /* DIAG_TEMP {"ok":true,"celsius":42.5} */
+        snprintf(out, n, "DIAG_TEMP {\"ok\":true,\"celsius\":%.1f}", celsius);
+    } else {
+        ESP_LOGE(TAG, "temp sensor failed: %s", esp_err_to_name(err));
+        snprintf(out, n, "DIAG_TEMP {\"ok\":false,\"celsius\":null,\"error\":\"%s\"}",
+                 esp_err_to_name(err));
+    }
+}
+
+/* ----------------------------------------------------------------------- */
+/* GPIO 일괄 점검                                                          */
+/*  - 자유롭게 쓸 수 있는(주변장치/스트래핑/플래시/PSRAM/USB 가 아닌) GPIO */
+/*    들을 대상으로, 내부 풀업/풀다운을 걸고 입력으로 읽어 핀이 의도대로   */
+/*    HIGH/LOW 로 동작하는지 확인한다(외부 배선 없이 가능한 비침습 검사).  */
+/*  - 풀업→1, 풀다운→0 이 모두 맞으면 그 핀은 정상으로 본다.              */
+/* ----------------------------------------------------------------------- */
+static void report_gpio(char *out, size_t n)
+{
+    /* 안전한 자유 GPIO 목록(YD-ESP32-S3 N16R8 기준).
+     * 제외: 0(BOOT), 3/45/46(스트래핑), 19/20(USB), 26~37(플래시/Octal PSRAM),
+     *       43/44(UART TX/RX), 48(RGB LED). */
+    static const int pins[] = {
+        1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 38, 47,
+    };
+    const int num_pins = sizeof(pins) / sizeof(pins[0]);
+
+    int tested = 0;
+    int passed = 0;
+    char failed[96];
+    failed[0] = '\0';
+
+    for (int i = 0; i < num_pins; i++) {
+        int pin = pins[i];
+        gpio_config_t io = {
+            .pin_bit_mask = 1ULL << pin,
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        if (gpio_config(&io) != ESP_OK) {
+            continue;  /* 설정 자체 실패한 핀은 집계에서 제외 */
+        }
+        tested++;
+        vTaskDelay(pdMS_TO_TICKS(2));
+        int hi = gpio_get_level(pin);  /* 풀업 → 1 기대 */
+
+        /* 풀다운으로 바꿔 0 기대. */
+        io.pull_up_en = GPIO_PULLUP_DISABLE;
+        io.pull_down_en = GPIO_PULLDOWN_ENABLE;
+        gpio_config(&io);
+        vTaskDelay(pdMS_TO_TICKS(2));
+        int lo = gpio_get_level(pin);  /* 풀다운 → 0 기대 */
+
+        if (hi == 1 && lo == 0) {
+            passed++;
+        } else {
+            /* 실패한 핀 번호를 목록에 추가(외부 배선이 연결된 핀은 여기 잡힐 수 있음). */
+            char tmp[8];
+            snprintf(tmp, sizeof(tmp), "%s%d", failed[0] ? "," : "", pin);
+            strncat(failed, tmp, sizeof(failed) - strlen(failed) - 1);
+        }
+    }
+
+    /* DIAG_GPIO {"ok":true,"tested":20,"passed":20,"failed":[]} */
+    snprintf(out, n,
+             "DIAG_GPIO {\"ok\":%s,\"tested\":%d,\"passed\":%d,\"failed\":[%s]}",
+             (passed == tested && tested > 0) ? "true" : "false",
+             tested, passed, failed);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -268,13 +403,17 @@ void app_main(void)
     static char psram_line[160];
     static char led_line[160];
     static char button_line[160];
-    static char wifi_line[200];
+    static char wifi_line[2048];  /* AP 목록(ssid/rssi/ch)까지 담으므로 크게 */
+    static char temp_line[160];
+    static char gpio_line[200];
 
     report_chip(chip_line, sizeof(chip_line));
     report_psram(psram_line, sizeof(psram_line));
     report_led(led_line, sizeof(led_line));
     report_button(button_line, sizeof(button_line));
     report_wifi(wifi_line, sizeof(wifi_line));
+    report_temp(temp_line, sizeof(temp_line));
+    report_gpio(gpio_line, sizeof(gpio_line));
 
     /* --- 보관한 결과를 약 2초마다 반복 출력한다. ---
      * flash 직후 호스트가 언제 시리얼을 열든 완전한 한 사이클
@@ -294,6 +433,8 @@ void app_main(void)
         printf("%s\n", led_line);
         printf("%s\n", button_line);
         printf("%s\n", wifi_line);
+        printf("%s\n", temp_line);
+        printf("%s\n", gpio_line);
         printf("DIAG_DONE\n");
         fflush(stdout);
 

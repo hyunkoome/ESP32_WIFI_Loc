@@ -92,6 +92,8 @@ CHECK_LABELS = {
     "rgb_led": "RGB LED",
     "boot_button": "BOOT Button",
     "wifi_scan": "WiFi Scan",
+    "temperature": "Temperature",
+    "gpio": "GPIO",
 }
 
 # 전체 결과(Overall)에 영향을 주는 "필수" 검사 항목.

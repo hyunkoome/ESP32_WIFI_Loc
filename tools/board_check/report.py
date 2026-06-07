@@ -94,6 +94,10 @@ def format_board(result: Dict[str, object]) -> str:
             line += f"   {Style.DIM if _COLOR else ''}{detail}{Style.RESET_ALL if _COLOR else ''}"
         lines.append(line)
 
+        # 하위 목록(WiFi AP 목록, GPIO 불일치 핀 등)을 들여써서 나열.
+        for sub in item.get("sublist") or []:
+            lines.append(f"      {Style.DIM if _COLOR else ''}{sub}{Style.RESET_ALL if _COLOR else ''}")
+
     # 스트레스 테스트 결과(있을 때).
     stress = result.get("stress")
     if stress:
