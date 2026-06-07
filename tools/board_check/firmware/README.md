@@ -7,6 +7,33 @@ GPIO 점검 같은 검사는 칩에서 코드가 실제로 실행돼야 하므�
 
 ---
 
+## 진단 결과 화면 (웹 대시보드)
+
+펌웨어가 출력한 `DIAG_*` 결과는 CLI 뿐 아니라 **웹 대시보드**로도 볼 수 있고,
+탭에서 WiFi 접속·BLE 스캔 결과까지 대화형으로 확인할 수 있습니다.
+
+### 진단 탭 — 전체 항목 PASS/FAIL 요약
+
+USB·UART·부트로더·Flash·PSRAM·RGB LED·BOOT 버튼·WiFi·BLE·온도·GPIO 결과를
+한눈에 보여주고, RGB LED 라이브 색 순환도 함께 표시합니다.
+
+![진단 탭](../figures/main_tap.png)
+
+### WiFi 탭 — 스캔 목록 + 접속 테스트
+
+검색된 AP 를 RSSI 순으로 나열하고, AP 를 클릭해 비밀번호를 입력하면 실제
+접속(`DIAG_WIFI_CONNECT`)을 대화형으로 테스트할 수 있습니다.
+
+![WiFi 탭](../figures/wifi_tap.png)
+
+### BLE 탭 — Bluetooth LE 기기 목록
+
+주변에서 발견된 Bluetooth LE 기기를 RSSI 순으로 나열합니다.
+
+![BLE 탭](../figures/ble_tap.png)
+
+---
+
 ## 가장 쉬운 방법: 2단계 스크립트 (권장)
 
 보드의 **오른쪽 USB-C 포트(`COM`/CH343, `1A86:55D3`)** 에 케이블을 연결한 뒤,
@@ -54,6 +81,30 @@ bash scripts/step02_run_cli_based_diagnostics.sh --stress 100      # 스트레�
 
 > ⚠️ [2단계]는 보드의 flash 를 **전체 erase** 한 뒤 진단 펌웨어로 덮어씁니다.
 > 보드에 보존할 펌웨어/데이터가 있으면 먼저 백업하세요.
+
+---
+
+## 웹 대시보드로 진단하기 ([3단계], 선택)
+
+CLI 대신 브라우저에서 진단하고 싶으면 [3단계] 스크립트로 웹 대시보드(FastAPI)를
+띄웁니다. 위 [진단 결과 화면](#진단-결과-화면-웹-대시보드)의 진단/WiFi/BLE 탭이
+이 대시보드입니다. 결과를 녹색/적색 동그라미로 보여주고, RGB LED 순환과 BOOT
+버튼은 라이브로 갱신하며, WiFi 접속·BLE 스캔을 대화형으로 테스트할 수 있습니다.
+
+```bash
+# [1단계] 펌웨어 빌드는 동일하게 먼저 1회 (없으면 런타임 검사만 SKIP)
+bash scripts/step01_build_diag_firmware.sh
+
+# [3단계] 웹 대시보드 기동
+bash scripts/step03_run_web_based_diagnostics.sh
+# → 브라우저에서 http://127.0.0.1:8000 열기 (종료: Ctrl+C)
+
+# 다른 PC 에서 접속하려면 바인드 주소/포트 지정:
+HOST=0.0.0.0 PORT=9000 bash scripts/step03_run_web_based_diagnostics.sh
+```
+
+> 웹 의존성은 `tools/board_check/requirements-web.txt`(FastAPI/uvicorn)에 있고,
+> [3단계] 스크립트가 venv 에 진단·웹 의존성을 함께 설치합니다.
 
 ---
 
@@ -117,8 +168,8 @@ idf.py -p /dev/ttyACM0 flash monitor
 DIAG_START
 DIAG_CHIP         {"cores":2,"model":"ESP32-S3","revision":2}
 DIAG_PSRAM        {"present":true,"size":8388608}
-DIAG_LED          {"ok":true,"gpio":48}
-DIAG_BUTTON       {"idle_level":1,"pressed_now":false,"gpio":0}
+DIAG_LED          {"ok":true,"gpio":48,"color":"R"}
+DIAG_BUTTON       {"idle_level":1,"pressed_now":false,"ever_pressed":false,"gpio":0}
 DIAG_WIFI         {"ap_count":15,"strongest_rssi":-42,"aps":[{"ssid":"AP","rssi":-42,"ch":6}]}
 DIAG_WIFI_CONNECT {"attempted":true,"connected":true,"ssid":"AP","ip":"192.168.0.10"}
 DIAG_BLE          {"ok":true,"devices":3,"list":[{"addr":"..","rssi":-77,"name":"JBL"}]}
