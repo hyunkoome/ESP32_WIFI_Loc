@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 import config
 from esptool_wrapper import run_esptool
@@ -220,6 +220,70 @@ def run_firmware_diagnostics(port: str, use_sudo: bool = False) -> Dict[str, obj
     diag = read_diagnostics(port)
     diag["flashed"] = True
     return diag
+
+
+# DIAG 태그 → 필드 매핑(스트리밍/단발 파싱 공용).
+_TAG_MAP = {
+    "DIAG_PSRAM": "psram",
+    "DIAG_WIFI": "wifi",
+    "DIAG_WIFI_CONNECT": "wifi_connect",
+    "DIAG_BLE": "ble",
+    "DIAG_CHIP": "chip",
+    "DIAG_LED": "led",
+    "DIAG_BUTTON": "button",
+    "DIAG_TEMP": "temp",
+    "DIAG_GPIO": "gpio",
+}
+
+
+def stream_cycles(
+    port: str,
+    should_stop: Callable[[], bool],
+    on_cycle: Callable[[Dict[str, object]], None],
+    baud: int = config.FIRMWARE_MONITOR_BAUD,
+) -> Optional[str]:
+    """
+    이미 진단 펌웨어가 도는 보드에서 시리얼을 한 번 열고, 반복 출력되는
+    DIAG_START..DIAG_DONE 사이클을 계속 읽어 완전한 사이클마다 on_cycle(dict)를
+    호출한다(웹 라이브 모니터용).
+
+    should_stop() 가 True 가 되면 종료한다. 시리얼을 한 번만 열어 보드 리셋을
+    최소화한다. 반환: 오류 메시지(있으면) 또는 None.
+    """
+    if serial is None:
+        return "pyserial 미설치"
+    ser = None
+    try:
+        ser = serial.Serial(port, baudrate=baud, timeout=1.0)
+        cur: Dict[str, object] = {}
+        saw_start = False
+        while not should_stop():
+            line = ser.readline().decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            tag, _, payload = line.partition(" ")
+            if tag == "DIAG_START":
+                saw_start = True
+                cur = {}
+                continue
+            field = _TAG_MAP.get(tag)
+            if field:
+                try:
+                    cur[field] = json.loads(payload)
+                except Exception:
+                    cur[field] = {"parse_error": payload}
+            elif tag == "DIAG_DONE" and saw_start:
+                on_cycle(dict(cur))
+                saw_start = False
+        return None
+    except Exception as exc:
+        return str(exc)
+    finally:
+        if ser is not None:
+            try:
+                ser.close()
+            except Exception:
+                pass
 
 
 def watch_button_press(

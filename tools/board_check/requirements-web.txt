@@ -1,0 +1,4 @@
+# 웹 대시보드(step03)용 추가 의존성.
+# CLI 진단(requirements.txt)에 더해 설치한다.
+fastapi>=0.110
+uvicorn[standard]>=0.27

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32-S3 보드 진단 대시보드</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>🔧 ESP32-S3 보드 진단 대시보드</h1>
+    <div id="fw-status" class="badge">펌웨어 확인 중…</div>
+  </header>
+
+  <main>
+    <!-- 보드 선택 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>연결된 보드</h2>
+        <button id="btn-refresh" class="btn">↻ 새로고침</button>
+      </div>
+      <div id="board-list" class="board-list">탐색 중…</div>
+    </section>
+
+    <!-- 진행 로그 -->
+    <section class="panel" id="progress-panel" hidden>
+      <div class="panel-head"><h2>진행 상황</h2></div>
+      <div id="progress" class="progress"></div>
+    </section>
+
+    <!-- 결과 -->
+    <section class="panel" id="result-panel" hidden>
+      <div class="panel-head">
+        <h2>진단 결과 <span id="overall-badge"></span></h2>
+        <div class="live-controls">
+          <span id="led-indicator" class="led-dot" title="RGB LED 순환"></span>
+          <button id="btn-live" class="btn" disabled>▶ 라이브 모니터</button>
+        </div>
+      </div>
+
+      <div id="board-info" class="board-info"></div>
+
+      <!-- 검사 항목 (녹색/적색 동그라미) -->
+      <div id="checks" class="checks"></div>
+
+      <!-- WiFi AP 목록 -->
+      <div class="sublist-box" id="wifi-box" hidden>
+        <h3>📶 WiFi 스캔 목록</h3>
+        <div id="wifi-list" class="scan-list"></div>
+      </div>
+
+      <!-- BLE 기기 목록 -->
+      <div class="sublist-box" id="ble-box" hidden>
+        <h3>🔵 Bluetooth LE 기기</h3>
+        <div id="ble-list" class="scan-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>ESP32_WIFI_Loc · 보드 자동 진단 (웹)</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
