@@ -21,3 +21,17 @@ CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 # 네이티브 USB-Serial-JTAG 로 로그를 보고 싶다면 아래를 활성화하세요.
 # (기본 UART0 출력으로도 firmware.py 가 읽을 수 있습니다.)
 # CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# --- Bluetooth LE (NimBLE) ---
+# BLE 스캔 검사를 위해 BT 컨트롤러 + NimBLE 호스트 스택을 활성화한다.
+# ESP32-S3 는 BLE 전용(클래식 BT 없음).
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+# WiFi 와 BLE 를 함께 쓰므로 소프트웨어 coexistence 활성화.
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+
+# --- 파티션 테이블 (커스텀) ---
+# BT/NimBLE 를 켜면 앱 크기가 1MB 를 넘으므로, 16MB Flash 를 활용해 앱 파티션을
+# 3MB 로 키운 커스텀 파티션 테이블을 사용한다.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

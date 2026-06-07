@@ -48,6 +48,15 @@
 #define HAVE_ESP_PSRAM 1
 #endif
 
+/* Bluetooth LE (NimBLE) — BT 활성 빌드에서만 포함. */
+#ifdef CONFIG_BT_NIMBLE_ENABLED
+#include "nimble/nimble_port.h"
+#include "nimble/nimble_port_freertos.h"
+#include "host/ble_hs.h"
+#include "host/ble_gap.h"
+#include "host/util/util.h"
+#endif
+
 /* WiFi 접속 테스트용 자격증명. step01_build_diag_firmware.sh 가 config.yaml 에서
  * 읽어 wifi_credentials.h 로 생성한다(빌드 시 주입, gitignore 처리). 헤더가 없거나
  * 값이 비어 있으면 접속 테스트는 생략(SKIP)된다. */
@@ -378,6 +387,129 @@ static void report_wifi_connect(char *out, size_t n)
 }
 
 /* ----------------------------------------------------------------------- */
+/* BLE 스캔 (NimBLE)                                                       */
+/*  - NimBLE 호스트를 초기화하고 약 5초간 BLE 광고를 수동(passive) 스캔해   */
+/*    주변 기기 개수/목록(주소·RSSI·이름)을 보고한다. ESP32-S3 는 BLE 전용. */
+/* ----------------------------------------------------------------------- */
+#ifdef CONFIG_BT_NIMBLE_ENABLED
+
+#define BLE_MAX_DEV       24
+#define BLE_SCAN_DONE_BIT BIT0
+#define BLE_SCAN_MS       5000
+
+typedef struct {
+    uint8_t addr[6];
+    int rssi;
+    char name[32];
+} ble_dev_t;
+
+static EventGroupHandle_t s_ble_eg;
+static ble_dev_t s_ble_devs[BLE_MAX_DEV];
+static int s_ble_count;
+
+static int ble_gap_event(struct ble_gap_event *event, void *arg)
+{
+    if (event->type == BLE_GAP_EVENT_DISC) {
+        const uint8_t *a = event->disc.addr.val;
+        /* 이미 본 주소면 RSSI 만 갱신(중복 광고 제거). */
+        for (int i = 0; i < s_ble_count; i++) {
+            if (memcmp(s_ble_devs[i].addr, a, 6) == 0) {
+                s_ble_devs[i].rssi = event->disc.rssi;
+                return 0;
+            }
+        }
+        if (s_ble_count < BLE_MAX_DEV) {
+            ble_dev_t *d = &s_ble_devs[s_ble_count];
+            memcpy(d->addr, a, 6);
+            d->rssi = event->disc.rssi;
+            d->name[0] = '\0';
+            struct ble_hs_adv_fields fields;
+            if (ble_hs_adv_parse_fields(&fields, event->disc.data,
+                                        event->disc.length_data) == 0) {
+                if (fields.name != NULL && fields.name_len > 0) {
+                    int ln = fields.name_len < 31 ? fields.name_len : 31;
+                    memcpy(d->name, fields.name, ln);
+                    d->name[ln] = '\0';
+                }
+            }
+            s_ble_count++;
+        }
+    } else if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
+        xEventGroupSetBits(s_ble_eg, BLE_SCAN_DONE_BIT);
+    }
+    return 0;
+}
+
+static void ble_on_sync(void)
+{
+    uint8_t own_addr_type;
+    if (ble_hs_id_infer_auto(0, &own_addr_type) != 0) {
+        own_addr_type = BLE_OWN_ADDR_PUBLIC;
+    }
+    struct ble_gap_disc_params disc = { 0 };
+    disc.passive = 1;            /* 수동 스캔(광고만 수신). */
+    disc.filter_duplicates = 0;  /* 중복은 호스트 코드에서 직접 제거. */
+    ble_gap_disc(own_addr_type, BLE_SCAN_MS, &disc, ble_gap_event, NULL);
+}
+
+static void ble_host_task(void *param)
+{
+    nimble_port_run();             /* nimble_port_stop() 호출 시까지 블로킹. */
+    nimble_port_freertos_deinit();
+}
+
+static void report_ble(char *out, size_t n)
+{
+    s_ble_count = 0;
+    s_ble_eg = xEventGroupCreate();
+
+    esp_err_t err = nimble_port_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nimble_port_init failed: %s", esp_err_to_name(err));
+        snprintf(out, n,
+                 "DIAG_BLE {\"ok\":false,\"devices\":0,\"list\":[],\"error\":\"init\"}");
+        vEventGroupDelete(s_ble_eg);
+        return;
+    }
+    ble_hs_cfg.sync_cb = ble_on_sync;
+    nimble_port_freertos_init(ble_host_task);
+
+    /* 스캔 완료까지 대기(스캔 시간 + 여유). */
+    xEventGroupWaitBits(s_ble_eg, BLE_SCAN_DONE_BIT, pdFALSE, pdFALSE,
+                        pdMS_TO_TICKS(BLE_SCAN_MS + 3000));
+
+    /* NimBLE 정지/해제(다음 검사·반복 출력에 영향 없도록). */
+    if (nimble_port_stop() == 0) {
+        nimble_port_deinit();
+    }
+    vEventGroupDelete(s_ble_eg);
+
+    /* JSON: 요약 + 기기 목록(addr/rssi/name). */
+    int off = snprintf(out, n, "DIAG_BLE {\"ok\":true,\"devices\":%d,\"list\":[",
+                       s_ble_count);
+    for (int i = 0; i < s_ble_count; i++) {
+        char name_esc[64];
+        json_escape(s_ble_devs[i].name, name_esc, sizeof(name_esc));
+        const uint8_t *a = s_ble_devs[i].addr;
+        /* NimBLE 주소는 리틀엔디안 — 사람이 읽는 순서로 뒤집어 표기. */
+        off += snprintf(out + off, (off < (int)n) ? n - off : 0,
+                        "%s{\"addr\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
+                        "\"rssi\":%d,\"name\":\"%s\"}",
+                        i ? "," : "", a[5], a[4], a[3], a[2], a[1], a[0],
+                        s_ble_devs[i].rssi, name_esc);
+        if (off >= (int)n - 4) { break; }
+    }
+    snprintf(out + off, (off < (int)n) ? n - off : 0, "]}");
+}
+
+#else  /* BT 비활성 빌드 폴백 */
+static void report_ble(char *out, size_t n)
+{
+    snprintf(out, n, "DIAG_BLE {\"ok\":false,\"devices\":0,\"list\":[],\"error\":\"BT disabled\"}");
+}
+#endif
+
+/* ----------------------------------------------------------------------- */
 /* 내장 온도센서                                                           */
 /*  - ESP32-S3 내장 temperature sensor 를 설치/활성화해 칩 온도를 읽는다.  */
 /*  - 동작 자체(설치+읽기 성공) 확인이 목적. 절대값은 칩 다이 온도라 실온  */
@@ -504,6 +636,7 @@ void app_main(void)
     static char button_line[160];
     static char wifi_line[2048];  /* AP 목록(ssid/rssi/ch)까지 담으므로 크게 */
     static char wifi_conn_line[200];
+    static char ble_line[2048];   /* 기기 목록(addr/rssi/name)까지 담으므로 크게 */
     static char temp_line[160];
     static char gpio_line[200];
 
@@ -513,6 +646,7 @@ void app_main(void)
     report_button(button_line, sizeof(button_line));
     report_wifi(wifi_line, sizeof(wifi_line));
     report_wifi_connect(wifi_conn_line, sizeof(wifi_conn_line));
+    report_ble(ble_line, sizeof(ble_line));
     report_temp(temp_line, sizeof(temp_line));
     report_gpio(gpio_line, sizeof(gpio_line));
 
@@ -535,6 +669,7 @@ void app_main(void)
         printf("%s\n", button_line);
         printf("%s\n", wifi_line);
         printf("%s\n", wifi_conn_line);
+        printf("%s\n", ble_line);
         printf("%s\n", temp_line);
         printf("%s\n", gpio_line);
         printf("DIAG_DONE\n");

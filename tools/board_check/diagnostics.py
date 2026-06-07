@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Callable, Dict, List, Optional
 
+import ble_test
 import config
 import esptool_wrapper
 import firmware as firmware_mod
@@ -248,6 +249,16 @@ def diagnose_board(
         ip=wifi_conn_res.get("ip"),
     )
 
+    # 6-2c) BLE 스캔 — 진단 펌웨어 기반(옵션).
+    ble_res = ble_test.evaluate_ble(fw_diag if use_firmware else None)
+    checks["ble"] = _check(
+        ble_res["status"],
+        ble_res["detail"],
+        devices=ble_res.get("devices"),
+        ble_list=ble_res.get("list"),
+        sublist=ble_res.get("sublist"),
+    )
+
     # 6-3) 내장 온도센서 / GPIO 일괄 점검 — 진단 펌웨어 기반(옵션).
     temp_res = peripheral_test.evaluate_temp(fw_diag if use_firmware else None)
     checks["temperature"] = _check(
@@ -286,7 +297,7 @@ def diagnose_board(
     # (GPIO 는 외부 배선 연결 핀이 오탐될 수 있어 SKIP 로 두고 격상 대상에서 제외.)
     if use_firmware:
         for key in ("psram", "rgb_led", "boot_button", "wifi_scan",
-                    "wifi_connect", "temperature"):
+                    "wifi_connect", "ble", "temperature"):
             if checks.get(key, {}).get("status") == config.STATUS_FAIL:
                 overall = config.STATUS_FAIL
                 break

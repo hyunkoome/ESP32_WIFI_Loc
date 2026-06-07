@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# step02_run_diagnostics.sh  —  [2단계] 보드 진단 실행
+# step02_run_cli_based_diagnostics.sh  —  [2단계] 보드 진단 실행
 # ====================================================
 # [1단계] step01_build_diag_firmware.sh 로 만든 진단 펌웨어(diag_merged.bin)를
 # 보드에 올리고, 실제 하드웨어 검사를 수행한다. 반복 실행해도 되는 단계다.
@@ -18,9 +18,9 @@
 #   2) bash scripts/step01_build_diag_firmware.sh  # 펌웨어 빌드(최초 1회)
 #
 # 사용:
-#   bash scripts/step02_run_diagnostics.sh                  # 자동 탐색 후 검사
-#   bash scripts/step02_run_diagnostics.sh --port /dev/ttyACM0
-#   bash scripts/step02_run_diagnostics.sh --sudo           # 포트 권한 부족 시
+#   bash scripts/step02_run_cli_based_diagnostics.sh                  # 자동 탐색 후 검사
+#   bash scripts/step02_run_cli_based_diagnostics.sh --port /dev/ttyACM0
+#   bash scripts/step02_run_cli_based_diagnostics.sh --sudo           # 포트 권한 부족 시
 #
 # 모든 옵션은 그대로 main.py 로 전달된다(--port, --sudo, --stress, --min-ap,
 # --jobs, --verbose 등).

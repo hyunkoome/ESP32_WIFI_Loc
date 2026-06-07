@@ -95,6 +95,7 @@ CHECK_LABELS = {
     "boot_button": "BOOT Button",
     "wifi_scan": "WiFi Scan",
     "wifi_connect": "WiFi Connect",
+    "ble": "Bluetooth LE",
     "temperature": "Temperature",
     "gpio": "GPIO",
 }

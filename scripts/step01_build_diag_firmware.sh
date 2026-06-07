@@ -6,7 +6,7 @@
 # 가능한 병합 바이너리(build/diag_merged.bin)를 생성한다.
 #
 # 이 단계는 보통 "한 번만" 실행하면 된다(펌웨어 소스를 고치면 다시 실행).
-# 실제 보드 검사는 [2단계] scripts/step02_run_diagnostics.sh 로 한다.
+# 실제 보드 검사는 [2단계] scripts/step02_run_cli_based_diagnostics.sh 로 한다.
 #
 #   0) ESP-IDF 설치 확인 — 없으면 scripts/install_esp_idf.sh 로 자동 설치
 #   1) (필요 시) 활성 venv 해제 — ESP-IDF 환경과 충돌 방지

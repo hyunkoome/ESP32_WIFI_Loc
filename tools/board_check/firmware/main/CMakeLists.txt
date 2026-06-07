@@ -7,5 +7,7 @@ idf_component_register(
     #   esp_psram                              : PSRAM 검사
     #   driver                                 : GPIO(BOOT 버튼)
     #   led_strip                              : WS2812 RGB LED (managed component)
-    REQUIRES esp_wifi nvs_flash esp_netif esp_event esp_psram driver led_strip
+    #   esp_driver_tsens(driver)               : 내장 온도센서
+    #   bt                                     : Bluetooth LE (NimBLE) 스캔
+    REQUIRES esp_wifi nvs_flash esp_netif esp_event esp_psram driver led_strip bt
 )

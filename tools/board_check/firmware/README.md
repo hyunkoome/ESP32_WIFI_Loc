@@ -1,8 +1,9 @@
 # ESP32-S3 진단 펌웨어
 
-WiFi AP 스캔, PSRAM, RGB LED, BOOT 버튼 같은 검사는 칩에서 코드가 실제로
-실행돼야 하므로(esptool 만으로는 불가), 이 작은 ESP-IDF 펌웨어를 보드에 올린 뒤
-시리얼 출력을 호스트(`firmware.py`)가 파싱합니다.
+PSRAM, RGB LED, BOOT 버튼, WiFi 스캔/접속, **Bluetooth LE 스캔**, 내장 온도센서,
+GPIO 점검 같은 검사는 칩에서 코드가 실제로 실행돼야 하므로(esptool 만으로는 불가),
+이 작은 ESP-IDF 펌웨어를 보드에 올린 뒤 시리얼 출력을 호스트(`firmware.py`)가
+파싱합니다.
 
 ---
 
@@ -16,7 +17,7 @@ WiFi AP 스캔, PSRAM, RGB LED, BOOT 버튼 같은 검사는 칩에서 코드가
 bash scripts/step01_build_diag_firmware.sh
 
 # [2단계] 보드 진단 실행 (반복 실행 가능)
-bash scripts/step02_run_diagnostics.sh
+bash scripts/step02_run_cli_based_diagnostics.sh
 ```
 
 > 오른쪽 COM 포트가 플래시·로그에 가장 안정적입니다. 좌/우 구분은
@@ -34,7 +35,7 @@ bash scripts/step02_run_diagnostics.sh
 | 1 | `idf.py build` 로 펌웨어 빌드 |
 | 2 | `idf.py merge-bin` 으로 병합 → `firmware/build/diag_merged.bin` 생성 |
 
-### [2단계] `step02_run_diagnostics.sh`
+### [2단계] `step02_run_cli_based_diagnostics.sh`
 
 | 동작 | 내용 |
 |------|------|
@@ -44,9 +45,9 @@ bash scripts/step02_run_diagnostics.sh
 자주 쓰는 옵션(모두 `main.py` 로 전달됨):
 
 ```bash
-bash scripts/step02_run_diagnostics.sh --sudo            # 포트 권한 부족 시
-bash scripts/step02_run_diagnostics.sh --port /dev/ttyACM0
-bash scripts/step02_run_diagnostics.sh --stress 100      # 스트레스 테스트
+bash scripts/step02_run_cli_based_diagnostics.sh --sudo            # 포트 권한 부족 시
+bash scripts/step02_run_cli_based_diagnostics.sh --port /dev/ttyACM0
+bash scripts/step02_run_cli_based_diagnostics.sh --stress 100      # 스트레스 테스트
 ```
 
 > ⚠️ [2단계]는 보드의 flash 를 **전체 erase** 한 뒤 진단 펌웨어로 덮어씁니다.
@@ -106,15 +107,26 @@ idf.py -p /dev/ttyACM0 flash monitor
 
 펌웨어는 부팅 후 아래 라인을 출력합니다(`firmware.py` 가 파싱):
 
+검사는 부팅 시 1회만 수행해 결과를 보관하고, 아래 한 사이클(`DIAG_START` ~
+`DIAG_DONE`)을 약 2초마다 반복 출력합니다(호스트가 늦게 연결해도 완전한 사이클을
+받도록). RGB LED 는 매 사이클 R→G→B 로 순환 점등합니다.
+
 ```
 DIAG_START
-DIAG_CHIP   {"cores":2,"model":"ESP32-S3","revision":2}
-DIAG_PSRAM  {"present":true,"size":8388608}
-DIAG_LED    {"ok":true,"gpio":48}
-DIAG_BUTTON {"idle_level":1,"pressed_now":false,"gpio":0}
-DIAG_WIFI   {"ap_count":15,"strongest_rssi":-42}
+DIAG_CHIP         {"cores":2,"model":"ESP32-S3","revision":2}
+DIAG_PSRAM        {"present":true,"size":8388608}
+DIAG_LED          {"ok":true,"gpio":48}
+DIAG_BUTTON       {"idle_level":1,"pressed_now":false,"gpio":0}
+DIAG_WIFI         {"ap_count":15,"strongest_rssi":-42,"aps":[{"ssid":"AP","rssi":-42,"ch":6}]}
+DIAG_WIFI_CONNECT {"attempted":true,"connected":true,"ssid":"AP","ip":"192.168.0.10"}
+DIAG_BLE          {"ok":true,"devices":3,"list":[{"addr":"..","rssi":-77,"name":"JBL"}]}
+DIAG_TEMP         {"ok":true,"celsius":34.0}
+DIAG_GPIO         {"ok":true,"tested":20,"passed":20,"failed":[]}
 DIAG_DONE
 ```
+
+> WiFi 접속(`DIAG_WIFI_CONNECT`)은 `config.yaml` 의 wifi.ssid/password 를 빌드 시
+> 주입해 실제 AP 에 붙어 본다(미설정 시 `attempted:false` → 호스트가 SKIP).
 
 ---
 
