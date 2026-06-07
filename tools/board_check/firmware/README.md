@@ -1,59 +1,130 @@
 # ESP32-S3 진단 펌웨어
 
-WiFi AP 스캔과 PSRAM 런타임 검사는 칩에서 코드가 실행돼야 하므로, 이 작은
-ESP-IDF 펌웨어를 보드에 올린 뒤 시리얼 출력을 호스트가 파싱합니다.
-진단 도구(`main.py --firmware`)는 빌드된 바이너리를 자동으로 flash하고 결과를
-읽습니다.
+WiFi AP 스캔, PSRAM, RGB LED, BOOT 버튼 같은 검사는 칩에서 코드가 실제로
+실행돼야 하므로(esptool 만으로는 불가), 이 작은 ESP-IDF 펌웨어를 보드에 올린 뒤
+시리얼 출력을 호스트(`firmware.py`)가 파싱합니다.
 
-## 사전 준비: ESP-IDF 5.x
+---
+
+## 가장 쉬운 방법: 2단계 스크립트 (권장)
+
+보드의 **오른쪽 USB-C 포트(`COM`/CH343, `1A86:55D3`)** 에 케이블을 연결한 뒤,
+저장소 루트에서 두 단계를 실행합니다.
 
 ```bash
-# ESP-IDF 설치(이미 설치돼 있으면 export만)
-git clone -b v5.3.1 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
-~/esp/esp-idf/install.sh esp32s3
-source ~/esp/esp-idf/export.sh   # 새 터미널마다 실행 (IDF_PATH 설정)
+# [1단계] 펌웨어 빌드 (최초 1회 — ESP-IDF 없으면 자동 설치)
+bash scripts/step01_build_diag_firmware.sh
+
+# [2단계] 보드 진단 실행 (반복 실행 가능)
+bash scripts/step02_run_diagnostics.sh
 ```
 
-## 빌드
+> 오른쪽 COM 포트가 플래시·로그에 가장 안정적입니다. 좌/우 구분은
+> [docs/usb-ports.md](../../../docs/usb-ports.md) 참고.
+
+**왜 둘로 나누나:** 빌드(느림, ESP-IDF 환경, 보통 1회)와 진단 실행(빠름, venv
+환경, 반복)은 성격과 Python 환경이 달라서 분리했습니다. 펌웨어 소스를 고쳤을
+때만 [1단계]를 다시 실행하면 됩니다.
+
+### [1단계] `step01_build_diag_firmware.sh`
+
+| 동작 | 내용 |
+|------|------|
+| 0 | ESP-IDF 설치 확인(없으면 `scripts/install_esp_idf.sh` 로 자동 설치) |
+| 1 | `idf.py build` 로 펌웨어 빌드 |
+| 2 | `idf.py merge-bin` 으로 병합 → `firmware/build/diag_merged.bin` 생성 |
+
+### [2단계] `step02_run_diagnostics.sh`
+
+| 동작 | 내용 |
+|------|------|
+| 1 | 진단용 Python venv 준비(없으면 생성 + `requirements.txt` 설치) |
+| 2 | `main.py --firmware` 실행 — flash 전체 erase → 펌웨어 다운로드 → **PSRAM/WiFi/RGB LED/BOOT 버튼까지 모두 검사** |
+
+자주 쓰는 옵션(모두 `main.py` 로 전달됨):
+
+```bash
+bash scripts/step02_run_diagnostics.sh --sudo            # 포트 권한 부족 시
+bash scripts/step02_run_diagnostics.sh --port /dev/ttyACM0
+bash scripts/step02_run_diagnostics.sh --stress 100      # 스트레스 테스트
+```
+
+> ⚠️ [2단계]는 보드의 flash 를 **전체 erase** 한 뒤 진단 펌웨어로 덮어씁니다.
+> 보드에 보존할 펌웨어/데이터가 있으면 먼저 백업하세요.
+
+---
+
+## 수동으로 단계별 실행하기
+
+스크립트 대신 직접 단계를 밟고 싶을 때.
+
+### 1) ESP-IDF 5.x 설치
+
+```bash
+bash scripts/install_esp_idf.sh          # ~/esp/esp-idf 에 설치(toolchain 포함)
+# 수동 설치 시:
+#   git clone -b v5.4 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+#   ~/esp/esp-idf/install.sh esp32s3
+source ~/esp/esp-idf/export.sh           # 새 터미널마다 실행 (IDF_PATH 설정)
+```
+
+### 2) 빌드 + 병합 바이너리 생성
+
+진단 도구는 `firmware/build/diag_merged.bin` 하나(부트로더+파티션+앱 병합)를
+`0x0` 에 flash 합니다. `step01_build_diag_firmware.sh` 가 빌드와
+병합(`idf.py merge-bin`)을 함께 처리합니다.
+
+직접 `idf.py` 로 하려면:
 
 ```bash
 cd tools/board_check/firmware
 idf.py set-target esp32s3
 idf.py build
+idf.py merge-bin -o build/diag_merged.bin
 ```
 
-## 진단 도구가 사용하는 병합 바이너리 만들기
+### 3) 진단 실행
 
-진단 도구는 `firmware/build/diag_merged.bin` 하나를 `0x0`에 flash합니다.
-(esptool만 있으면 되도록 부트로더+파티션+앱을 하나로 병합)
+```bash
+source venv/bin/activate
+python tools/board_check/main.py --firmware
+```
+
+### (선택) 도구 없이 직접 확인
+
+ESP-IDF 환경에서 flash + 모니터를 직접 띄워 `DIAG_*` 라인을 눈으로 볼 수도
+있습니다:
 
 ```bash
 cd tools/board_check/firmware
-esptool.py --chip esp32s3 merge_bin -o build/diag_merged.bin \
-  @build/flash_args
+idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-> 참고: esptool v5에서는 `merge-bin`, `@build/flash_args` 인자 파일을 사용합니다.
-> 또는 ESP-IDF가 생성하는 `idf.py build` 산출물을 그대로 flash해도 됩니다:
-> ```bash
-> idf.py -p /dev/ttyACM0 flash monitor
-> ```
-> 이 경우 도구 없이도 시리얼에서 `DIAG_*` 라인을 직접 확인할 수 있습니다.
+---
 
 ## 출력 규약
 
-펌웨어는 부팅 후 다음 라인을 출력합니다(`firmware.py`가 파싱):
+펌웨어는 부팅 후 아래 라인을 출력합니다(`firmware.py` 가 파싱):
 
 ```
 DIAG_START
-DIAG_CHIP  {"cores":2,"model":"ESP32-S3","revision":2}
-DIAG_PSRAM {"present":true,"size":8388608}
-DIAG_WIFI  {"ap_count":15,"strongest_rssi":-42}
+DIAG_CHIP   {"cores":2,"model":"ESP32-S3","revision":2}
+DIAG_PSRAM  {"present":true,"size":8388608}
+DIAG_LED    {"ok":true,"gpio":48}
+DIAG_BUTTON {"idle_level":1,"pressed_now":false,"gpio":0}
+DIAG_WIFI   {"ap_count":15,"strongest_rssi":-42}
 DIAG_DONE
 ```
 
-## 빌드 없이 사용하려면
+---
 
-ESP-IDF 설치가 부담되면 `--firmware` 옵션을 빼고 실행하세요. 이 경우
-WiFi/PSRAM 항목은 `SKIP`으로 표시되고, 나머지 esptool 기반 하드웨어 검사는
-모두 정상 수행됩니다.
+## 펌웨어 빌드 없이 사용하려면
+
+ESP-IDF 설치가 부담되면 `--firmware` 옵션을 빼고 실행하세요:
+
+```bash
+python tools/board_check/main.py
+```
+
+이 경우 PSRAM/WiFi/LED/버튼 항목은 `SKIP` 으로 표시되고, esptool 기반 하드웨어
+검사(USB/UART/부트로더/Flash)는 모두 정상 수행됩니다.

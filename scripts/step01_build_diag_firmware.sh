@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 #
-# build_diag_firmware.sh
-# ======================
+# step01_build_diag_firmware.sh  —  [1단계] 펌웨어 준비(빌드)
+# ===========================================================
 # 보드 진단 펌웨어(tools/board_check/firmware)를 빌드하고, esptool로 한 번에 flash
 # 가능한 병합 바이너리(build/diag_merged.bin)를 생성한다.
 #
+# 이 단계는 보통 "한 번만" 실행하면 된다(펌웨어 소스를 고치면 다시 실행).
+# 실제 보드 검사는 [2단계] scripts/step02_run_diagnostics.sh 로 한다.
+#
+#   0) ESP-IDF 설치 확인 — 없으면 scripts/install_esp_idf.sh 로 자동 설치
 #   1) (필요 시) 활성 venv 해제 — ESP-IDF 환경과 충돌 방지
 #   2) ESP-IDF 환경 활성화 (export.sh)
 #   3) idf.py set-target esp32s3 && idf.py build
@@ -14,7 +18,10 @@
 #         (= config.FIRMWARE_BIN, main.py --firmware 가 이 파일을 flash)
 #
 # 사용:
-#   bash scripts/build_diag_firmware.sh
+#   bash scripts/step01_build_diag_firmware.sh
+#
+# 환경변수:
+#   IDF_DIR  ESP-IDF 설치 경로(기본 ~/esp/esp-idf)
 #
 set -euo pipefail
 
@@ -40,19 +47,24 @@ if [ -n "${VIRTUAL_ENV:-}" ]; then
     unset VIRTUAL_ENV
 fi
 
-# --- 2) ESP-IDF 환경 활성화 --------------------------------------------------
+# --- 0) ESP-IDF 설치 확인 (없으면 자동 설치) ---------------------------------
 if [ ! -f "${IDF_DIR}/export.sh" ]; then
-    echo "[에러] ESP-IDF 를 찾을 수 없습니다: ${IDF_DIR}"
-    echo "       먼저 설치하세요:  bash scripts/install_esp_idf.sh"
-    exit 1
+    echo "[0/3] ESP-IDF 미설치 — 설치를 시작합니다(수 분 소요): ${IDF_DIR}"
+    bash "${SCRIPT_DIR}/install_esp_idf.sh"
 fi
+
+# --- 2) ESP-IDF 환경 활성화 --------------------------------------------------
 echo "[1/3] ESP-IDF 환경 활성화: ${IDF_DIR}"
 # shellcheck disable=SC1091
 source "${IDF_DIR}/export.sh" >/dev/null
 
 # --- 3) 빌드 ------------------------------------------------------------------
 cd "${FW_DIR}"
-echo "[2/3] idf.py 빌드 (첫 빌드는 수 분 소요)"
+# 항상 클린 빌드한다: 이전 build/ 산출물·managed_components 를 모두 지워(fullclean)
+# 캐시/구버전 컴포넌트로 인한 미묘한 빌드 오염을 원천 차단한다. 첫 빌드처럼 수 분
+# 소요되지만, 재현성과 안정성을 우선한다.
+echo "[2/3] 클린 빌드 (fullclean → set-target → build, 수 분 소요)"
+idf.py fullclean
 idf.py set-target esp32s3
 idf.py build
 
