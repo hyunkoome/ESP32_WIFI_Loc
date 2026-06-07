@@ -113,10 +113,10 @@ bash scripts/step03_run_web_based_diagnostics.sh
 ## 개발 진행 상황
 
 CSI 연구에 들어가기 전, 먼저 구매한 ESP32-S3 보드들의 하드웨어 이상 여부를 자동
-검사하는 진단 도구(Phase 1)를 만들었습니다. 자세한 사용법은
+검사하는 진단 도구를 만들었습니다. 자세한 사용법은
 [`tools/board_check/README.md`](tools/board_check/README.md) 참고.
 
-### ✅ 완료 (Phase 1: 보드 자동 진단)
+### ✅ 완료 (보드 자동 진단)
 
 - **CLI 진단 도구** — 다중 보드 병렬 검사, PASS/FAIL 리포트(JSON/로그) 저장
 - **검사 항목** — USB·UART·부트로더·Flash·Flash 크기(esptool) + PSRAM·RGB LED·
@@ -126,7 +126,7 @@ CSI 연구에 들어가기 전, 먼저 구매한 ESP32-S3 보드들의 하드웨
 - **2/3단계 스크립트** — 빌드(step01)·CLI 진단(step02)·웹 대시보드(step03) 자동화
 - **문서** — 설치/펌웨어/Python 환경/USB 포트/Espressif 생태계 가이드
 
-### ⬜ 추가 예정 (To do · Phase 2+: CSI 수집·센싱)
+### ⬜ 추가 예정 (To do · CSI 수집·센싱)
 
 - **CSI 수집 펌웨어** — ESP32-S3 WiFi CSI 콜백 기반 패킷별 CSI 추출
   ([esp-csi](docs/espressif.md) 참고)

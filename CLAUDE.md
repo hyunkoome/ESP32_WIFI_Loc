@@ -127,8 +127,21 @@ localization, WiFi pose estimation.
     `scripts/` 의 ESP-IDF 사용 — 해당 행에 ✓ 를 추가한다.
   - 현재 적용(✓) 3개: **esp-idf**(빌드 SDK), **esptool**(flash·칩 조회),
     **idf-extra-components**(`espressif/led_strip` 컴포넌트의 소스 repo).
-  - `esp-csi` 등은 ★ 가 높아도 **Phase 2 예정**이면 아직 빈칸. 실제 사용 시 ✓.
+  - `esp-csi` 등은 ★ 가 높아도 **CSI 수집 단계 예정**이면 아직 빈칸. 실제 사용 시 ✓.
 - **별점(★)** 은 "이 CSI 센싱 프로젝트에 얼마나 직접 쓰이느냐" 기준의 **주관적
   관련도**(저장소 품질/스타와 무관).
 - 갱신 후 `docs/espressif.md` 를 링크하는 문서들(루트 `README.md`, `docs/*`,
   `tools/board_check/README.md`, `firmware/README.md`)의 개수 표기도 어긋나면 맞춘다.
+
+---
+
+## 9. 문서 표기/갱신 규칙 (⚠️ 사용자 지시)
+
+- ⛔ **"Phase 1 / Phase 2 / Phase X" 같은 단계 라벨을 `README.md` 및 `docs/`,
+  `tools/**/README.md` 등 사용자 문서에 절대 쓰지 않는다.** 로드맵/단계 개념은
+  **이 `CLAUDE.md` 안에서만** 관리한다(위 1장 등). 사용자 문서에는 단계 번호 대신
+  **내용 중심**으로 표현한다 — 예: "보드 자동 진단", "CSI 수집 단계",
+  "완료 / 추가 예정(To do)". (작업 중 무심코 "Phase N" 을 넣지 말 것.)
+- **기능이 완료/추가될 때마다** 루트 `README.md` 의 **"개발 진행 상황"**
+  (✅ 완료 / ⬜ 추가 예정 To do) 리스트를 같이 갱신한다. 완료한 항목은
+  To do → 완료로 옮기고, 새로 할 일이 생기면 To do 에 추가한다.

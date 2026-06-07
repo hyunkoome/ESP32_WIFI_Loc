@@ -12,7 +12,7 @@
 >
 > **본 프로젝트 적용** 열의 `✓` 는 이 저장소가 실제로 본 프로젝트에서 쓰이고 있다는
 > 뜻입니다(현재 3개: esp-idf, esptool, idf-extra-components 의 led_strip 컴포넌트).
-> 빈칸은 미사용(esp-csi 등 ★5/★4 라도 Phase 2 예정이면 아직 빈칸).
+> 빈칸은 미사용(esp-csi 등 ★5/★4 라도 CSI 수집 단계에 쓸 예정이면 아직 빈칸).
 
 ---
 
@@ -42,7 +42,7 @@ GitHub 계정은 이 칩들을 위한 **공식 SDK·툴·예제의 본진**입�
 
 | 별점 | 의미 | 개수 |
 |------|------|------|
-| ★★★★★ | 지금 이미 쓰거나 Phase 2(CSI 수집)에 **필수** | 3 |
+| ★★★★★ | 지금 이미 쓰거나 CSI 수집 단계에 **필수** | 3 |
 | ★★★★ | CSI 수집·신호처리·학습·개발 도구로 **직접** 도움 | 10 |
 | ★★★ | WiFi/네트워킹·멀티보드·플래시/디버그·보드/빌드 도구 등 **간접** 관련 | 69 |
 | ★★ | ESP32 생태계 일반(타 프로토콜·클라우드·멀티미디어·음성/비전 AI 등). 우리와 약함 | 77 |
@@ -54,13 +54,13 @@ GitHub 계정은 이 칩들을 위한 **공식 SDK·툴·예제의 본진**입�
 
 ---
 
-## ★★★★★ — 최우선 (지금/Phase 2 필수)
+## ★★★★★ — 최우선 (지금/CSI 수집 단계 필수)
 
 | 저장소 | ⭐ | 설명 | 본 프로젝트 적용 |
 |--------|----|------|----------|
 | [esp-idf](https://github.com/espressif/esp-idf) | 18,247 | Espressif 공식 IoT 개발 프레임워크(C/C++ SDK). idf.py·툴체인·FreeRTOS 포함 — 진단/CSI 펌웨어 빌드에 이미 사용 중 | ✓ (펌웨어 빌드 SDK) |
 | [esptool](https://github.com/espressif/esptool) | 6,364 | 칩 펌웨어 flash·프로비저닝·칩/Flash 정보 조회 시리얼 유틸. 진단 도구 핵심 의존성 | ✓ (펌웨어 flash·칩 조회) |
-| [esp-csi](https://github.com/espressif/esp-csi) | 1,367 | WiFi CSI 기반 응용(실내 위치추정·사람 감지 등) 예제 — **Phase 2 의 출발점** |  |
+| [esp-csi](https://github.com/espressif/esp-csi) | 1,367 | WiFi CSI 기반 응용(실내 위치추정·사람 감지 등) 예제 — **CSI 수집 단계의 출발점** |  |
 
 ---
 
@@ -428,5 +428,5 @@ ESP32 를 쓰지만 CSI 센싱과는 직접 관련이 적음.
 
 > CSI(Channel State Information)는 WiFi 신호의 부반송파별 진폭·위상으로, 사람이
 > 움직이면 변합니다 — 이를 분석해 존재/움직임/호흡/제스처/실내위치를 추정하는 것이
-> 본 프로젝트의 목표입니다. Phase 2 에서 [esp-csi](https://github.com/espressif/esp-csi)
+> 본 프로젝트의 목표입니다. 다음 CSI 수집 단계에서 [esp-csi](https://github.com/espressif/esp-csi)
 > 기반으로 수집 펌웨어를 구성할 예정입니다.
