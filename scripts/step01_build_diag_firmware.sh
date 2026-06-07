@@ -60,11 +60,13 @@ source "${IDF_DIR}/export.sh" >/dev/null
 
 # --- 3) 빌드 ------------------------------------------------------------------
 cd "${FW_DIR}"
-# 항상 클린 빌드한다: 이전 build/ 산출물·managed_components 를 모두 지워(fullclean)
-# 캐시/구버전 컴포넌트로 인한 미묘한 빌드 오염을 원천 차단한다. 첫 빌드처럼 수 분
-# 소요되지만, 재현성과 안정성을 우선한다.
-echo "[2/3] 클린 빌드 (fullclean → set-target → build, 수 분 소요)"
-idf.py fullclean
+# 항상 "완전" 클린 빌드한다: 빌드 폴더(build/)와 자동 복원되는 managed_components/ 를
+# 물리적으로 삭제한 뒤 처음부터 다시 빌드한다. 캐시/구버전 컴포넌트로 인한 미묘한
+# 빌드 오염을 원천 차단한다. 매번 첫 빌드처럼 수 분 소요되지만 재현성/안정성을 우선.
+#   - build/             : idf.py build 산출물(부트로더/앱/오브젝트 캐시 등)
+#   - managed_components/: idf_component.yml + dependencies.lock 으로 다시 다운로드됨
+echo "[2/3] 완전 클린 빌드 (build/ 삭제 후 처음부터, 수 분 소요)"
+rm -rf "${FW_DIR}/build" "${FW_DIR}/managed_components"
 idf.py set-target esp32s3
 idf.py build
 
