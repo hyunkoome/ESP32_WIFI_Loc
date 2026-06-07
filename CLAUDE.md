@@ -99,3 +99,36 @@ localization, WiFi pose estimation.
 
 - 이 저장소는 **AGPL v3** (`LICENSE`) 로 공개된다. 새 소스 파일 추가 시
   라이선스 호환성에 유의한다.
+
+---
+
+## 8. 문서 유지보수: `docs/espressif.md` (Espressif 저장소 목록)
+
+`docs/espressif.md` 는 Espressif GitHub 조직의 **공개 저장소 전체**를 본 프로젝트
+관련도(★5~★1)로 정리한 표다. 아래 규칙으로 **계속 갱신**한다.
+
+- **언제 갱신하나**:
+  - Espressif 에 새 저장소가 생겼거나(목록 재조회 시 차이 발생),
+  - 본 프로젝트가 어떤 Espressif 저장소/컴포넌트를 **새로 쓰기 시작**했을 때.
+- **목록 재조회**(전체 데이터 한 번에):
+  ```bash
+  for p in 1 2 3 4; do
+    gh api "orgs/espressif/repos?per_page=100&page=$p" \
+      --jq '.[] | [.stargazers_count,(.archived|tostring),.name,(.description//"")] | @tsv'
+  done
+  ```
+  스타 내림차순으로 tier 안에서 정렬한다. (작성 시점 317개 = 활성 288 + 보관 29)
+- **표 컬럼**: `저장소 | ⭐ | 설명 | 본 프로젝트 적용`
+  - 설명은 GitHub description 을 **한국어로 번역**(코드 식별자/고유명사/제품명은
+    원문 유지). 🗄️ 는 `archived`(보관) 저장소 표시.
+  - **본 프로젝트 적용** 열: 실제로 쓰는 저장소만 `✓ (용도)` 로 표시. 새 의존성
+    추가 시 — `tools/board_check/requirements*.txt`,
+    `tools/board_check/firmware/main/idf_component.yml`(managed_components),
+    `scripts/` 의 ESP-IDF 사용 — 해당 행에 ✓ 를 추가한다.
+  - 현재 적용(✓) 3개: **esp-idf**(빌드 SDK), **esptool**(flash·칩 조회),
+    **idf-extra-components**(`espressif/led_strip` 컴포넌트의 소스 repo).
+  - `esp-csi` 등은 ★ 가 높아도 **Phase 2 예정**이면 아직 빈칸. 실제 사용 시 ✓.
+- **별점(★)** 은 "이 CSI 센싱 프로젝트에 얼마나 직접 쓰이느냐" 기준의 **주관적
+  관련도**(저장소 품질/스타와 무관).
+- 갱신 후 `docs/espressif.md` 를 링크하는 문서들(루트 `README.md`, `docs/*`,
+  `tools/board_check/README.md`, `firmware/README.md`)의 개수 표기도 어긋나면 맞춘다.
