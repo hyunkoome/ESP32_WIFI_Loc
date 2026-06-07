@@ -60,7 +60,7 @@ python tools/board_check/main.py
 ```
 
 PSRAM / WiFi 스캔·접속 / Bluetooth LE / RGB LED / BOOT 버튼 / 온도센서 / GPIO 까지
-**런타임 검사**를 하려면 진단 펌웨어가 필요합니다. 아래 2단계로 실행합니다 —
+**런타임 검사**를 하려면 진단 펌웨어가 필요합니다. 아래 단계로 실행합니다 —
 [설치 가이드](docs/install.md) 참고.
 
 ```bash
@@ -69,6 +69,9 @@ bash scripts/step01_build_diag_firmware.sh
 
 # [2단계] 보드 진단 (CLI) — 반복 실행 가능
 bash scripts/step02_run_cli_based_diagnostics.sh
+
+# [3단계] (선택) 웹 대시보드로 진단 — 브라우저에서 http://127.0.0.1:8000
+bash scripts/step03_run_web_based_diagnostics.sh
 ```
 
 > WiFi **접속** 테스트는 저장소 루트의 `config.yaml` 에 적은 SSID/비밀번호로 실제
@@ -77,6 +80,10 @@ bash scripts/step02_run_cli_based_diagnostics.sh
 > [2단계]는 기본으로 **대화형 BOOT 버튼 검사**를 포함합니다 — 검사 끝에 보드별로
 > "BOOT 버튼을 누르세요" 안내가 나오면 누르면 됩니다. 끄려면 `--no-button-test`:
 > `bash scripts/step02_run_cli_based_diagnostics.sh --no-button-test`
+
+> [3단계] 웹 대시보드는 진단/WiFi/BLE 탭에서 결과를 보여주고 WiFi 접속·BLE 스캔을
+> 대화형으로 테스트합니다. 화면 예시는
+> [진단 펌웨어 README](tools/board_check/firmware/README.md#진단-결과-화면-웹-대시보드) 참고.
 
 ## 개발 환경
 

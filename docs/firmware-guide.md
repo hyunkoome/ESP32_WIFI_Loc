@@ -64,9 +64,9 @@ import gc; gc.collect(); print(gc.mem_free())   # 8MB PSRAM 활성 시 7MB 이�
 ## 2. 진단 펌웨어 (ESP-IDF, 직접 빌드)
 
 보드 진단 도구(`tools/board_check`)는 esptool 만으로 칩/Flash 등을 검사하지만, **PSRAM
-실동작·WiFi 스캔·RGB LED·BOOT 버튼**은 칩에서 코드가 실제로 돌아야 검증됩니다. 이를 위한
-작은 ESP-IDF 펌웨어가 [`tools/board_check/firmware/`](../tools/board_check/firmware/) 에
-있습니다.
+실동작·WiFi 스캔·WiFi 접속·Bluetooth LE 스캔·RGB LED·BOOT 버튼·내장 온도센서·GPIO**는
+칩에서 코드가 실제로 돌아야 검증됩니다. 이를 위한 작은 ESP-IDF 펌웨어가
+[`tools/board_check/firmware/`](../tools/board_check/firmware/) 에 있습니다.
 
 빌드/플래시/검증 방법은 전용 문서를 참고하세요:
 
@@ -83,7 +83,13 @@ idf.py build
 cd ../../..
 
 source venv/bin/activate              # 진단 도구 환경
-python tools/board_check/main.py --firmware   # PSRAM/WiFi/LED/버튼 포함 검사
+python tools/board_check/main.py --firmware   # PSRAM/WiFi/BLE/온도/GPIO/LED/버튼 포함 검사
+```
+
+CLI 대신 **웹 대시보드**로 진단하려면(진단/WiFi/BLE 탭, 라이브 LED 색):
+
+```bash
+bash scripts/step03_run_web_based_diagnostics.sh   # → http://127.0.0.1:8000
 ```
 
 > ESP-IDF 환경과 프로젝트 venv 가 헷갈린다면 [Python 환경 두 개](python-environments.md)

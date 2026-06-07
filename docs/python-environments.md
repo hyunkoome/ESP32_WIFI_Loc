@@ -14,7 +14,7 @@
 | **만든 주체** | 우리 (`python3 -m venv venv`) | ESP-IDF의 `install.sh`가 **자동** 생성 |
 | **용도** | 보드 진단 도구 실행 (esptool, pyserial) | 펌웨어 **빌드** (`idf.py`, kconfig, cmake 래퍼 등) |
 | **활성화** | `source venv/bin/activate` | `source ~/esp/esp-idf/export.sh` |
-| **무엇이 깔려있나** | `tools/board_check/requirements.txt` (esptool, pyserial, colorama) | ESP-IDF 빌드 시스템이 요구하는 고정 버전 패키지들 |
+| **무엇이 깔려있나** | `tools/board_check/requirements.txt` (esptool, pyserial, colorama) — 웹 대시보드 사용 시 `requirements-web.txt`(FastAPI/uvicorn)도 같은 venv 에 | ESP-IDF 빌드 시스템이 요구하는 고정 버전 패키지들 |
 
 두 환경 모두 **시스템 python3(`/usr/bin/python3`)을 베이스로** 각각 따로 만든 독립
 공간입니다. 시스템(루트) python 을 직접 더럽히지 않고, 서로 의존성이 섞이지 않게
