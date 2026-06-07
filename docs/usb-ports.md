@@ -61,3 +61,4 @@ YD-ESP32-S3 에는 USB-C 포트가 **2개** 있어 처음엔 어느 쪽에 꽂�
 - [보드 하드웨어 상세](../hw/YD-ESP32-S3/README.KR.md)
 - [펌웨어 가이드](firmware-guide.md)
 - [보드 진단 도구](../tools/board_check/README.md)
+- [Espressif 생태계](espressif.md) — ESP-IDF·esptool·esp-csi 등 Espressif GitHub 저장소 정리

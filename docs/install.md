@@ -187,3 +187,13 @@ python tools/board_check/main.py              # 기본 검사
 python tools/board_check/main.py --firmware   # PSRAM/WiFi/BLE/온도/GPIO/LED/버튼 포함 검사
 bash scripts/step03_run_web_based_diagnostics.sh   # 웹 대시보드(선택)
 ```
+
+---
+
+## 관련 문서
+
+- [Python 환경 두 개](python-environments.md) — 프로젝트 venv vs ESP-IDF venv
+- [펌웨어 가이드](firmware-guide.md) — MicroPython / ESP-IDF 펌웨어
+- [USB-C 포트 가이드](usb-ports.md) — 왼쪽(USB)/오른쪽(COM) 포트 차이
+- [보드 진단 도구](../tools/board_check/README.md) — 진단 도구(CLI/웹) 사용법
+- [Espressif 생태계](espressif.md) — ESP-IDF·esptool·esp-csi 등 Espressif GitHub 저장소 정리
