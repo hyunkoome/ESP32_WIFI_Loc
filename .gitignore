@@ -58,4 +58,6 @@ archive/
 
 # debug log
 results/
+
+# 참고용 외부 코드(esp-csi 등). 추적 안 함.
 reference/
