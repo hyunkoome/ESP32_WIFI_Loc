@@ -124,3 +124,4 @@ echo "alias get_idf='source ~/esp/esp-idf/export.sh'" >> ~/.bashrc
 - [설치 가이드](install.md) — 전체 설치 순서
 - [보드 진단 도구](../tools/board_check/README.md) — 진단 도구 사용법
 - [진단 펌웨어](../tools/board_check/firmware/README.md) — 펌웨어 빌드/플래시
+- [Espressif 생태계](espressif.md) — ESP-IDF·esptool·esp-csi 등 Espressif GitHub 저장소 정리

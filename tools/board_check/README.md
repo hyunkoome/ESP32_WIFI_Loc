@@ -164,3 +164,9 @@ python usb_detector.py            # 탐색된 보드 출력
 python serial_check.py /dev/ttyACM0
 python esptool_wrapper.py /dev/ttyACM0
 ```
+
+## 관련 문서
+
+- [진단 펌웨어](firmware/README.md) — PSRAM/WiFi/BLE/온도/GPIO 런타임 검사 펌웨어
+- [설치 가이드](../../docs/install.md) — venv/ESP-IDF/esptool 설치
+- [Espressif 생태계](../../docs/espressif.md) — ESP-IDF·esptool·esp-csi 등 Espressif GitHub 저장소 정리

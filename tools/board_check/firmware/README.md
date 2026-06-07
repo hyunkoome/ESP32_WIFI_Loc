@@ -193,3 +193,12 @@ python tools/board_check/main.py
 
 이 경우 PSRAM/WiFi/LED/버튼 항목은 `SKIP` 으로 표시되고, esptool 기반 하드웨어
 검사(USB/UART/부트로더/Flash)는 모두 정상 수행됩니다.
+
+---
+
+## 관련 문서
+
+- [보드 진단 도구](../README.md) — 진단 도구(CLI/웹) 사용법
+- [펌웨어 가이드](../../../docs/firmware-guide.md) — MicroPython / ESP-IDF 펌웨어
+- [Python 환경 두 개](../../../docs/python-environments.md) — 프로젝트 venv vs ESP-IDF venv
+- [Espressif 생태계](../../../docs/espressif.md) — ESP-IDF·esptool·esp-csi 등 Espressif GitHub 저장소 정리

@@ -102,3 +102,4 @@ bash scripts/step03_run_web_based_diagnostics.sh   # → http://127.0.0.1:8000
 - [Python 환경 두 개](python-environments.md)
 - [USB-C 포트 가이드](usb-ports.md)
 - [설치 가이드](install.md)
+- [Espressif 생태계](espressif.md) — ESP-IDF·esptool·esp-csi 등 Espressif GitHub 저장소 정리
