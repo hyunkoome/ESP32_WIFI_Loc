@@ -262,12 +262,10 @@ main { max-width: 920px; margin: 0 auto; padding: 16px 24px 24px; }
   background: #333; border: 1px solid var(--border);
   display: inline-block;
 }
-.led-dot.live { animation: ledcycle 6s linear infinite; }
-@keyframes ledcycle {
-  0%, 100% { background: #ff3030; box-shadow: 0 0 10px #ff3030; }
-  33% { background: #30ff30; box-shadow: 0 0 10px #30ff30; }
-  66% { background: #3030ff; box-shadow: 0 0 10px #3030ff; }
-}
+/* 라이브일 때 색은 JS(펌웨어 실제 색)가 지정한다. 여기선 "살아있음" 표시로
+ * 은은한 깜빡임(opacity)만 준다 — 색을 CSS 로 돌리면 카드 스와치와 어긋난다. */
+.led-dot.live { box-shadow: 0 0 10px currentColor; animation: ledglow 1.4s ease-in-out infinite; }
+@keyframes ledglow { 50% { opacity: 0.5; } }
 
 /* 진행 상황 시각화 */
 .progress-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
