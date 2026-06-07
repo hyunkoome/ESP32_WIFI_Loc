@@ -1,0 +1,23 @@
+# ESP32-S3 N16R8 (16MB Flash / 8MB Octal PSRAM) 진단 펌웨어 기본 설정.
+# idf.py build 시 이 값들이 sdkconfig 기본값으로 적용됩니다.
+
+# --- 대상 칩 ---
+CONFIG_IDF_TARGET="esp32s3"
+
+# --- Flash 16MB ---
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+
+# --- PSRAM 활성화 (Octal, 8MB) ---
+# YD-ESP32-S3 N16R8 은 octal(8-line) PSRAM 입니다.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+# 초기화 실패 시 부팅 중단하지 않음(진단 목적상 present=false로 보고하기 위함).
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# --- 콘솔 출력 ---
+# 네이티브 USB-Serial-JTAG 로 로그를 보고 싶다면 아래를 활성화하세요.
+# (기본 UART0 출력으로도 firmware.py 가 읽을 수 있습니다.)
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

@@ -1,0 +1,17 @@
+# ESP32-S3 보드 진단 도구 의존성
+# 설치:  pip install -r requirements.txt   (프로젝트 venv 활성화 후)
+
+# 칩/Flash/MAC 정보 조회 및 진단 펌웨어 flash. 핵심 의존성.
+esptool>=4.7,<6
+
+# 시리얼(UART) 포트 open 및 진단 펌웨어 출력 읽기.
+pyserial>=3.5
+
+# 컬러 터미널 출력.
+colorama>=0.4
+
+# (선택) USB VID/PID/시리얼 조회. 없으면 /sys 파일시스템으로 자동 폴백.
+pyudev>=0.22
+
+# (선택) 진행률 표시바. 없으면 단순 텍스트 진행 표시로 폴백.
+tqdm>=4.0

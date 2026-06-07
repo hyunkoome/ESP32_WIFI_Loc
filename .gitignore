@@ -1,0 +1,47 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== 가상환경 (venv, conda 아님) =====
+venv/
+.venv/
+env/             # 환경변수 파일 디렉터리(설정값)는 커밋 금지
+
+# ===== 환경변수/비밀값 =====
+.env
+*.env
+!*.env.example   # 예시 파일은 허용
+
+# ===== 진단 도구 산출물 =====
+tools/board_check/results/
+
+# ===== ESP-IDF 빌드 산출물 =====
+build/
+sdkconfig            # 생성물 — sdkconfig.defaults 만 커밋
+sdkconfig.old
+managed_components/
+dependencies.lock
+*.bin
+*.elf
+*.map
+
+# ===== 데이터/대용량 =====
+volumes/
+external/
+archive/
+*.csv
+*.npy
+*.npz
+*.h5
+
+# ===== OS / 에디터 =====
+.DS_Store
+.idea/
+.vscode/
+*.swp
