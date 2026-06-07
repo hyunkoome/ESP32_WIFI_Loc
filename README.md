@@ -24,7 +24,7 @@
 | [Python 환경 두 개](docs/python-environments.md) | 프로젝트 venv vs ESP-IDF venv — 왜 둘이고 언제 뭘 쓰나 |
 | [USB-C 포트 가이드](docs/usb-ports.md) | 왼쪽(USB)/오른쪽(COM) 포트 차이와 사용법 |
 | [펌웨어 가이드](docs/firmware-guide.md) | MicroPython bin 선택·플래시, 진단 펌웨어 |
-| [보드 진단 도구](tools/board_check/README.md) | Phase 1 진단 도구 사용법 |
+| [보드 진단 도구](tools/board_check/README.md) | 보드 자동 진단 도구 사용법 (CLI + 웹) |
 | [진단 펌웨어](tools/board_check/firmware/README.md) | PSRAM/WiFi/LED/버튼 검사 펌웨어 빌드 |
 | [보드 하드웨어](hw/YD-ESP32-S3/README.KR.md) | YD-ESP32-S3 데이터시트/핀맵/스펙 |
 
@@ -122,7 +122,7 @@ ESP32_WIFI_Loc/
 ├── hw/
 │   └── YD-ESP32-S3/      # 보드 하드웨어 자료(데이터시트/핀맵/벤더 펌웨어)
 ├── tools/
-│   └── board_check/      # Phase 1: 보드 자동 진단 도구 (+ firmware/ 진단 펌웨어)
+│   └── board_check/      # 보드 자동 진단 도구 (+ firmware/ 진단 펌웨어)
 ├── docs/                 # 설치/환경/하드웨어 세부 문서
 ├── scripts/              # 보조 스크립트 (ESP-IDF 설치 등)
 ├── CLAUDE.md             # Claude Code 작업 가이드라인
