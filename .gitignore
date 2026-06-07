@@ -30,6 +30,8 @@ dependencies.lock
 *.bin
 *.elf
 *.map
+# 단, YD-ESP32-S3 배포용 MicroPython 펌웨어 bin 은 자산이므로 포함(위 *.bin 예외)
+!hw/YD-ESP32-S3/1-MPY-firmware/*.bin
 
 # ===== 데이터/대용량 =====
 volumes/

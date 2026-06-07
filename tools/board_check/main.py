@@ -8,6 +8,9 @@ ESP32-S3 자동 진단 및 불량 검사 도구의 진입점(CLI).
 결과를 컬러 터미널로 출력한 뒤 JSON/로그로 저장합니다.
 
 사용 예:
+    sudo usermod -aG dialout hyunkoo # 현재 사용자에게 시리얼 포트 권한 부여(로그아웃 후 적용)
+    newgrp dialout          # 이 셸에서 즉시 활성화 (로그아웃 불필요)
+    
     # 연결된 모든 보드 기본 검사
     python main.py
 

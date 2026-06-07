@@ -113,23 +113,35 @@ def run_esptool(
 # ---------------------------------------------------------------------------
 # 출력 파싱
 # ---------------------------------------------------------------------------
-# esptool 연결 배너 예시(v5):
-#   Chip is ESP32-S3 (QFN56) (revision v0.2)
-#   Features: WiFi, BLE, Embedded Flash 8MB (XMC)
-#   Crystal is 40MHz
-#   MAC: 7c:df:a1:xx:xx:xx
-_RE_CHIP = re.compile(r"Chip is\s+([A-Za-z0-9\-]+)")
+# esptool 연결 배너는 버전에 따라 라벨이 다르므로 v4/v5 양쪽을 모두 매칭한다.
+#   esptool v4 예:
+#     Chip is ESP32-S3 (QFN56) (revision v0.2)
+#     Crystal is 40MHz
+#   esptool v5 예:
+#     Connected to ESP32-S3 on /dev/ttyACM0:
+#     Chip type:          ESP32-S3 (QFN56) (revision v0.2)
+#     Features:           Wi-Fi, BT 5 (LE), Dual Core + LP Core, 240MHz, Embedded PSRAM 8MB
+#     Crystal frequency:  40MHz
+#     MAC:                1c:db:d4:45:7b:30
+# => 'Chip is'(v4) 와 'Chip type:'(v5), 'Crystal is'(v4) 와 'Crystal frequency:'(v5) 둘 다 처리.
+_RE_CHIP = re.compile(r"Chip (?:is|type:)\s+([A-Za-z0-9\-]+)", re.IGNORECASE)
+# 연결 성공 판정: 'Chip is/type:' 또는 v5 의 'Connected to <chip> on' 중 하나만 있으면 OK.
+_RE_CONNECTED = re.compile(
+    r"(?:Chip (?:is|type:)|Connected to)\s+[A-Za-z0-9\-]+", re.IGNORECASE
+)
 _RE_REVISION = re.compile(r"revision\s+v?([0-9.]+)", re.IGNORECASE)
 _RE_FEATURES = re.compile(r"Features:\s*(.+)")
-_RE_CRYSTAL = re.compile(r"Crystal is\s+([0-9]+\s*MHz)", re.IGNORECASE)
+_RE_CRYSTAL = re.compile(r"Crystal (?:is|frequency:)\s+([0-9]+\s*MHz)", re.IGNORECASE)
 _RE_MAC = re.compile(r"MAC:\s*([0-9A-Fa-f:]{17})")
-# flash-id 출력:
-#   Manufacturer: ef
-#   Device: 4018
-#   Detected flash size: 16MB
-_RE_FLASH_MFR = re.compile(r"Manufacturer:\s*([0-9A-Fa-f]+)")
-_RE_FLASH_DEV = re.compile(r"Device:\s*([0-9A-Fa-f]+)")
-_RE_FLASH_SIZE = re.compile(r"Detected flash size:\s*([0-9]+\s*[KMG]B)", re.IGNORECASE)
+# flash-id 출력(라벨이 'Flash ' 접두어가 붙는 v5 변형도 함께 처리):
+#   Manufacturer: ef        / Flash Manufacturer: ef
+#   Device: 4018            / Flash Device: 4018
+#   Detected flash size: 16MB / Flash size: 16MB
+_RE_FLASH_MFR = re.compile(r"(?:Flash\s+)?Manufacturer:\s*([0-9A-Fa-f]+)", re.IGNORECASE)
+_RE_FLASH_DEV = re.compile(r"(?:Flash\s+)?Device:\s*([0-9A-Fa-f]+)", re.IGNORECASE)
+_RE_FLASH_SIZE = re.compile(
+    r"(?:Detected flash size|Flash size):\s*([0-9]+\s*[KMG]B)", re.IGNORECASE
+)
 
 
 def _search(pattern: re.Pattern, text: str) -> Optional[str]:
@@ -139,8 +151,8 @@ def _search(pattern: re.Pattern, text: str) -> Optional[str]:
 
 
 def _connected(text: str) -> bool:
-    """출력에 칩 식별 배너가 있으면 연결 성공으로 간주."""
-    return _RE_CHIP.search(text) is not None
+    """출력에 칩 식별 배너('Chip is/type:' 또는 'Connected to ...')가 있으면 연결 성공."""
+    return _RE_CONNECTED.search(text) is not None
 
 
 def get_chip_info(port: str, use_sudo: bool = False) -> Dict[str, object]:
