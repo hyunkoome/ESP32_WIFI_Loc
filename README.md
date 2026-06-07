@@ -59,18 +59,44 @@ sudo usermod -aG dialout "$USER" && newgrp dialout
 python tools/board_check/main.py
 ```
 
-PSRAM/WiFi/LED/버튼 런타임 검사까지 하려면 ESP-IDF 설치 후 진단 펌웨어를 빌드합니다 —
+PSRAM / WiFi 스캔·접속 / Bluetooth LE / RGB LED / BOOT 버튼 / 온도센서 / GPIO 까지
+**런타임 검사**를 하려면 진단 펌웨어가 필요합니다. 아래 2단계로 실행합니다 —
 [설치 가이드](docs/install.md) 참고.
 
 ```bash
-bash scripts/install_esp_idf.sh       # ESP-IDF 설치(최초 1회)
+# [1단계] 펌웨어 빌드 (최초 1회 — ESP-IDF 없으면 자동 설치)
+bash scripts/step01_build_diag_firmware.sh
+
+# [2단계] 보드 진단 (CLI) — 반복 실행 가능
+bash scripts/step02_run_cli_based_diagnostics.sh
 ```
+
+> WiFi **접속** 테스트는 저장소 루트의 `config.yaml` 에 적은 SSID/비밀번호로 실제
+> AP 에 붙어 봅니다(`config.yaml.example` 복사해 작성). 미설정 시 해당 항목만 SKIP.
 
 ## 개발 환경
 
 - Ubuntu Linux / Python 3.10+ (**venv**) / ESP-IDF 5.x
 - Python 환경이 **두 개**(진단 도구용 / 펌웨어 빌드용)입니다 — 헷갈리면
   [Python 환경 두 개](docs/python-environments.md) 참고.
+
+### 버전 이야기: ESP-IDF 5.4 와 esptool 5.3.0 은 서로 다른 것 (초보자용)
+
+진단을 돌리면 `✓ esptool 5.3.0 감지` 가 뜨는데, ESP-IDF 는 5.4 인데 왜 5.3 이냐고
+헷갈릴 수 있습니다. **둘은 완전히 다른 도구라 버전이 달라도 정상입니다.**
+
+| 이름 | 무엇 | 어디에 설치되나 | 누가 쓰나 |
+|------|------|----------------|-----------|
+| **ESP-IDF** (예: 5.4) | C 언어 SDK + 컴파일러 툴체인. 펌웨어를 **빌드**하는 데 쓰는 `idf.py` 가 들어 있음 | `~/esp/esp-idf` (스크립트가 설치) | **[1단계]** `step01_build_diag_firmware.sh` |
+| **esptool** (예: 5.3.0) | 보드에 펌웨어를 **굽고(flash)** 칩 정보를 읽는 작은 Python 프로그램 | 프로젝트 `venv/` (pip 로 설치) | **[2단계]** `step02_run_cli_based_diagnostics.sh` |
+
+- 두 버전 번호(5.4 vs 5.3.0)는 **서로 다른 버전 체계**라, 숫자가 비슷해도 아무 관계가
+  없습니다. 충돌이나 오류가 아닙니다.
+- ESP-IDF 안에도 자체 esptool 이 들어 있지만, 진단 도구([2단계])는 ESP-IDF 가 아니라
+  `venv` 에서 돌기 때문에 **`venv` 에 pip 로 깔린 esptool**(`requirements.txt` 의
+  `esptool>=4.7,<6` → 현재 5.3.0)을 사용합니다.
+- 비유하면 — ESP-IDF 는 "공장(프로그램을 만드는 곳)", esptool 은 "USB 라이터(만든 걸
+  보드에 굽는 도구)" 입니다. 둘은 따로 업데이트됩니다.
 
 ## 현재 단계 (Phase 1): 보드 자동 진단 도구
 

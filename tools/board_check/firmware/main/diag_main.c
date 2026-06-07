@@ -183,6 +183,26 @@ static void report_led(char *out, size_t n)
 /*  - 내부 풀업으로 입력 설정 후 유휴 레벨을 읽는다(정상이면 1).           */
 /*  - 짧은 윈도우 동안 눌림(0)도 감지해 부가 정보로 보고한다.             */
 /* ----------------------------------------------------------------------- */
+/* 버튼 상태 전역: 유휴 레벨과 "부팅 후 한 번이라도 눌림" 래치.
+ * 호스트의 대화형 버튼 검사(--button-test)가 ever_pressed 를 감시한다. */
+static int g_button_idle = 1;
+static volatile int g_button_ever_pressed = 0;
+
+/* 현재 버튼 상태로 DIAG_BUTTON 라인을 구성(눌림은 active-low: 0 이면 눌림). */
+static void build_button_line(char *out, size_t n)
+{
+    int pressed_now = (gpio_get_level(BOOT_BUTTON_GPIO) == 0);
+    if (pressed_now) {
+        g_button_ever_pressed = 1;
+    }
+    /* DIAG_BUTTON {"idle_level":1,"pressed_now":false,"ever_pressed":false,"gpio":0} */
+    snprintf(out, n,
+             "DIAG_BUTTON {\"idle_level\":%d,\"pressed_now\":%s,"
+             "\"ever_pressed\":%s,\"gpio\":%d}",
+             g_button_idle, pressed_now ? "true" : "false",
+             g_button_ever_pressed ? "true" : "false", BOOT_BUTTON_GPIO);
+}
+
 static void report_button(char *out, size_t n)
 {
     gpio_config_t io = {
@@ -194,21 +214,18 @@ static void report_button(char *out, size_t n)
     };
     gpio_config(&io);
 
-    int idle = gpio_get_level(BOOT_BUTTON_GPIO);
+    g_button_idle = gpio_get_level(BOOT_BUTTON_GPIO);
 
-    /* 약 0.5초간 눌림 여부 폴링(인터랙션은 선택). */
-    int pressed = 0;
+    /* 초기 약 0.5초 눌림 폴링(부팅 중 눌려 있으면 래치). */
     for (int i = 0; i < 10; i++) {
         if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
-            pressed = 1;
+            g_button_ever_pressed = 1;
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    /* DIAG_BUTTON {"idle_level":1,"pressed_now":false,"gpio":0} */
-    snprintf(out, n, "DIAG_BUTTON {\"idle_level\":%d,\"pressed_now\":%s,\"gpio\":%d}",
-             idle, pressed ? "true" : "false", BOOT_BUTTON_GPIO);
+    build_button_line(out, n);
 }
 
 /* JSON 문자열 값에 안전하도록 ", \\, 제어문자를 이스케이프해 dst 로 복사한다.
@@ -687,6 +704,14 @@ void app_main(void)
             color_idx = (color_idx + 1) % 3;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        /* 2초 대기 동안 BOOT 버튼을 50ms 간격으로 폴링해 눌림을 놓치지 않는다.
+         * (호스트의 대화형 버튼 검사가 다음 사이클의 ever_pressed 로 확인) */
+        for (int t = 0; t < 40; t++) {
+            if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+                g_button_ever_pressed = 1;
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        build_button_line(button_line, sizeof(button_line));
     }
 }

@@ -220,3 +220,65 @@ def run_firmware_diagnostics(port: str, use_sudo: bool = False) -> Dict[str, obj
     diag = read_diagnostics(port)
     diag["flashed"] = True
     return diag
+
+
+def watch_button_press(
+    port: str,
+    timeout: float = 15.0,
+    baud: int = config.FIRMWARE_MONITOR_BAUD,
+) -> Dict[str, object]:
+    """
+    이미 진단 펌웨어가 도는 보드에서 BOOT 버튼 눌림을 대화형으로 감시한다.
+
+    펌웨어는 DIAG_BUTTON 에 ever_pressed(부팅 후 한 번이라도 눌림)와 pressed_now
+    를 실시간으로 싣는다. 이 함수는 시리얼을 열어 그 값을 timeout 까지 지켜본다.
+
+    반환: {
+      "detected": bool,   # 눌림 감지(또는 이미 눌린 기록 있음)
+      "already":  bool,   # 감시 시작 시점에 이미 눌림 기록이 있었음
+      "error":    str|None,
+    }
+    """
+    result: Dict[str, object] = {"detected": False, "already": False, "error": None}
+    if serial is None:
+        result["error"] = "pyserial 미설치"
+        return result
+
+    ser = None
+    baseline_checked = False
+    try:
+        ser = serial.Serial(port, baudrate=baud, timeout=1.0)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            line = ser.readline().decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            tag, _, payload = line.partition(" ")
+            if tag != "DIAG_BUTTON":
+                continue
+            try:
+                data = json.loads(payload)
+            except Exception:
+                continue
+            ever = bool(data.get("ever_pressed"))
+            now = bool(data.get("pressed_now"))
+            # 첫 DIAG_BUTTON 으로 기준선(이미 눌린 기록 여부) 판단.
+            if not baseline_checked:
+                baseline_checked = True
+                if ever:
+                    result["already"] = True
+                    result["detected"] = True
+                    return result
+            if ever or now:
+                result["detected"] = True
+                return result
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
+    finally:
+        if ser is not None:
+            try:
+                ser.close()
+            except Exception:
+                pass

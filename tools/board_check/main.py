@@ -41,6 +41,7 @@ from typing import Dict, List, Optional
 import config
 import diagnostics
 import esptool_wrapper
+import firmware
 import report
 import usb_detector
 
@@ -90,6 +91,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=0,
         metavar="N",
         help="스트레스 테스트: esptool 연결을 N회 반복하며 통신 오류 집계(기본 0=비활성).",
+    )
+    parser.add_argument(
+        "--button-test",
+        action="store_true",
+        help="대화형 BOOT 버튼 검사: 보드별로 '버튼 누르세요' 안내 후 실제 눌림 감지"
+        "(--firmware 필요, 순차 진행).",
     )
     parser.add_argument(
         "--min-ap",
@@ -174,6 +181,44 @@ def select_boards(args: argparse.Namespace) -> List[Dict[str, object]]:
     return usb_detector.discover_boards()
 
 
+def run_button_tests(results: List[Dict[str, object]]) -> None:
+    """보드별로 BOOT 버튼을 누르도록 안내하고 실제 눌림을 감지(순차 진행).
+
+    펌웨어가 이미 보드에서 돌고 있으므로(반복 출력), 시리얼을 다시 열어
+    DIAG_BUTTON 의 ever_pressed/pressed_now 를 지켜본다. 결과를 boot_button
+    검사에 반영한다. 눌림 미감지여도 유휴(idle) 검사는 통과했으므로 FAIL 로
+    강등하지 않고 경고만 남긴다.
+    """
+    print(f"\n{Style.BRIGHT}=== 대화형 BOOT 버튼 검사 ==={Style.RESET_ALL}")
+    print("안내가 나오면 해당 보드의 BOOT 버튼을 누르세요.\n")
+    for r in results:
+        port = str(r.get("port"))
+        idx = r.get("board_index")
+        checks: Dict[str, Dict] = r.get("checks", {})  # type: ignore
+        btn = checks.get("boot_button")
+        # 펌웨어 미flash/미연결 등으로 버튼 검사가 SKIP 이면 대화형도 생략.
+        if not btn or btn.get("status") == config.STATUS_SKIP:
+            print(f"{Fore.YELLOW}Board #{idx} ({port}): 버튼 검사 불가 — 건너뜀{Style.RESET_ALL}")
+            continue
+        print(
+            f"{Fore.CYAN}Board #{idx} ({port}){Style.RESET_ALL}: "
+            f"지금 {Style.BRIGHT}BOOT 버튼{Style.RESET_ALL}을 누르세요... (15초 내)"
+        )
+        res = firmware.watch_button_press(port, timeout=15.0)
+        if res.get("error"):
+            print(f"  {Fore.YELLOW}버튼 검사 오류: {res['error']}{Style.RESET_ALL}")
+            continue
+        if res.get("detected"):
+            extra = " (이미 눌림 기록 있음)" if res.get("already") else ""
+            btn["status"] = config.STATUS_PASS
+            btn["detail"] = f"사용자 BOOT 버튼 눌림 확인됨{extra}"
+            btn["pressed_now"] = True
+            print(f"  {Fore.GREEN}✓ 눌림 감지{extra}{Style.RESET_ALL}")
+        else:
+            btn["detail"] = str(btn.get("detail", "")) + " (대화형: 시간 내 눌림 미감지)"
+            print(f"  {Fore.YELLOW}⚠ 시간 내 눌림 미감지 — 버튼을 확인하세요{Style.RESET_ALL}")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
 
@@ -256,8 +301,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             done += 1
             print(f"  진행률: {done}/{len(boards)} 완료")
 
-    # 보드 번호 순으로 정렬 후 리포트.
+    # 보드 번호 순으로 정렬.
     results.sort(key=lambda r: (r.get("board_index") or 0))
+
+    # 대화형 BOOT 버튼 검사(옵션) — 병렬 검사 뒤에 보드별로 순차 진행.
+    if args.button_test:
+        if not args.firmware:
+            print(
+                f"{Fore.YELLOW}⚠ --button-test 는 --firmware 가 필요합니다 — 건너뜀.{Style.RESET_ALL}"
+            )
+        else:
+            run_button_tests(results)
+
     print("\n" + "=" * 56)
     log_text = report.print_report(results)
 
