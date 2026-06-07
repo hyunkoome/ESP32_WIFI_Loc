@@ -49,6 +49,21 @@ import usb_detector  # noqa: E402
 app = FastAPI(title="ESP32-S3 보드 진단 대시보드")
 STATIC_DIR = BASE_DIR / "static"
 
+# 포트별 접근 직렬화 락(프로세스 전역). 같은 시리얼 포트에 진단(esptool flash)과
+# 라이브 모니터가 동시에 접근하면 'chip stopped responding' 으로 실패하므로,
+# 브라우저 탭/연결이 여러 개여도 포트당 하나의 작업만 돌도록 보장한다.
+_PORT_LOCKS: Dict[str, threading.Lock] = {}
+_PORT_LOCKS_GUARD = threading.Lock()
+
+
+def _port_lock(port: str) -> threading.Lock:
+    with _PORT_LOCKS_GUARD:
+        lock = _PORT_LOCKS.get(port)
+        if lock is None:
+            lock = threading.Lock()
+            _PORT_LOCKS[port] = lock
+        return lock
+
 
 def _json_safe(obj) -> object:
     """진단 결과에 비-직렬화 값이 섞여도 안전하게 JSON 화."""
@@ -106,24 +121,32 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     sender_task = asyncio.create_task(sender())
 
     def run_diagnose(port: str, use_sudo: bool) -> None:
-        try:
-            board = _build_board(port)
-            res = diagnostics.diagnose_board(
-                board,
-                use_sudo=use_sudo,
-                use_firmware=True,
-                progress=lambda m: push({"type": "progress", "msg": m}),
-            )
-            push({"type": "result", "data": _json_safe(res)})
-        except Exception as exc:  # 진단 실패가 서버를 죽이지 않도록.
-            push({"type": "error", "msg": f"진단 예외: {exc}"})
+        live_stop.set()  # 라이브 모니터가 돌고 있으면 먼저 정지시킨다.
+        # 라이브가 포트를 완전히 놓을 때까지 락에서 대기한 뒤 flash 진행.
+        with _port_lock(port):
+            try:
+                board = _build_board(port)
+                res = diagnostics.diagnose_board(
+                    board,
+                    use_sudo=use_sudo,
+                    use_firmware=True,
+                    progress=lambda m: push({"type": "progress", "msg": m}),
+                )
+                push({"type": "result", "data": _json_safe(res)})
+            except Exception as exc:  # 진단 실패가 서버를 죽이지 않도록.
+                push({"type": "error", "msg": f"진단 예외: {exc}"})
 
-    def run_live(port: str) -> None:
-        err = firmware_mod.stream_cycles(
-            port,
-            should_stop=live_stop.is_set,
-            on_cycle=lambda cyc: push({"type": "live", "data": _json_safe(cyc)}),
-        )
+    def run_live(port: str, stop_ev: threading.Event) -> None:
+        # 진단이 끝나 포트가 비면 락을 잡고 시리얼을 한 번 열어 사이클을 읽는다.
+        with _port_lock(port):
+            if stop_ev.is_set():
+                push({"type": "live_stopped", "error": None})
+                return
+            err = firmware_mod.stream_cycles(
+                port,
+                should_stop=stop_ev.is_set,
+                on_cycle=lambda cyc: push({"type": "live", "data": _json_safe(cyc)}),
+            )
         push({"type": "live_stopped", "error": err})
 
     try:
@@ -137,14 +160,17 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             if action == "diagnose":
                 port = str(msg.get("port"))
                 use_sudo = bool(msg.get("sudo"))
+                live_stop.set()  # 진행 중 라이브가 있으면 중지 신호
                 threading.Thread(
                     target=run_diagnose, args=(port, use_sudo), daemon=True
                 ).start()
             elif action == "start_live":
-                live_stop.set()  # 이전 라이브가 있으면 정지
+                live_stop.set()  # 이전 라이브 정지
                 live_stop = threading.Event()
                 port = str(msg.get("port"))
-                threading.Thread(target=run_live, args=(port,), daemon=True).start()
+                threading.Thread(
+                    target=run_live, args=(port, live_stop), daemon=True
+                ).start()
             elif action == "stop_live":
                 live_stop.set()
     except WebSocketDisconnect:

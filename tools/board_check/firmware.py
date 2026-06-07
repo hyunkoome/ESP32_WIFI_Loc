@@ -254,7 +254,20 @@ def stream_cycles(
         return "pyserial 미설치"
     ser = None
     try:
-        ser = serial.Serial(port, baudrate=baud, timeout=1.0)
+        # DTR/RTS 를 미리 내려(False) 포트 open 시 보드가 리셋되지 않게 한다.
+        # (CH343 의 자동 리셋 회로가 DTR/RTS 로 동작하므로. 리셋되면 보드가 모든
+        #  검사를 다시 도느라 라이브 갱신이 ~20초 지연된다.) 이미 돌고 있는
+        #  펌웨어의 반복 사이클을 그대로 받기 위함.
+        ser = serial.Serial()
+        ser.port = port
+        ser.baudrate = baud
+        ser.timeout = 1.0
+        try:
+            ser.dtr = False
+            ser.rts = False
+        except Exception:
+            pass
+        ser.open()
         cur: Dict[str, object] = {}
         saw_start = False
         while not should_stop():

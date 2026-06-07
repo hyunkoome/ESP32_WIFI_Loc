@@ -31,6 +31,55 @@ header {
   background: var(--panel);
 }
 header h1 { font-size: 18px; margin: 0; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand .logo { font-size: 26px; }
+.subtitle { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+
+/* 요약 바 */
+.summary {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px;
+  padding-bottom: 14px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.summary-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.overall {
+  font-size: 18px; font-weight: 800; padding: 6px 16px; border-radius: 999px;
+}
+.overall.PASS { background: var(--green); color: #04210f; }
+.overall.FAIL { background: var(--red); color: #fff; }
+.counts { display: flex; gap: 14px; font-size: 13px; }
+.cnt.pass { color: var(--green); }
+.cnt.fail { color: var(--red); }
+.cnt.skip { color: var(--muted); }
+.led-label { color: var(--muted); font-size: 13px; }
+.count-pill {
+  font-size: 12px; color: var(--muted); font-weight: 400;
+  background: var(--panel2); padding: 1px 8px; border-radius: 999px; margin-left: 6px;
+}
+.empty { color: var(--muted); padding: 12px 4px; }
+.board-meta .meta { margin-top: 3px; }
+
+/* 검사 항목 카드 그리드 */
+.checks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.check-card {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--gray);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.check-card.PASS { border-left-color: var(--green); }
+.check-card.FAIL { border-left-color: var(--red); }
+.check-card.SKIP { border-left-color: var(--gray); }
+.cc-top { display: flex; align-items: center; gap: 9px; }
+.cc-icon { font-size: 17px; }
+.cc-label { flex: 1; font-weight: 600; font-size: 14px; }
+.cc-detail { color: var(--muted); font-size: 12.5px; margin-top: 6px; line-height: 1.45; }
 
 .badge {
   font-size: 13px;
@@ -177,6 +226,61 @@ main { max-width: 920px; margin: 0 auto; padding: 24px; }
   33% { background: #30ff30; box-shadow: 0 0 10px #30ff30; }
   66% { background: #3030ff; box-shadow: 0 0 10px #3030ff; }
 }
+
+/* 진행 상황 시각화 */
+.progress-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.progress-text { flex: 1; }
+.progress-text #phase-text { font-weight: 600; font-size: 15px; }
+.muted { color: var(--muted); font-size: 12.5px; }
+.elapsed { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+
+.spinner {
+  width: 22px; height: 22px; flex-shrink: 0;
+  border: 3px solid var(--border);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.spinner.done { border-color: var(--green); border-top-color: var(--green); animation: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.progress-bar {
+  height: 8px; background: var(--panel2); border-radius: 999px;
+  overflow: hidden; margin-bottom: 14px;
+}
+.progress-bar-fill {
+  height: 100%; width: 0;
+  background: linear-gradient(90deg, var(--blue), var(--green));
+  border-radius: 999px; transition: width 0.4s ease;
+}
+
+.steps { display: flex; flex-wrap: wrap; gap: 8px; }
+.step {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; padding: 6px 12px; border-radius: 8px;
+  background: var(--panel2); border: 1px solid var(--border); color: var(--muted);
+}
+.step .step-ic {
+  width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; background: var(--gray); color: #fff;
+}
+.step.active { color: var(--text); border-color: var(--blue); }
+.step.active .step-ic { background: var(--blue); animation: pulse 1s ease-in-out infinite; }
+.step.done { color: var(--text); }
+.step.done .step-ic { background: var(--green); }
+@keyframes pulse { 50% { opacity: 0.4; } }
+
+/* BOOT 버튼 가이드 배너 */
+.btn-guide {
+  margin-top: 14px; padding: 16px; border-radius: 10px; text-align: center;
+  background: #1c2536; border: 2px dashed var(--blue);
+}
+.btn-guide.waiting { animation: pulse 1.2s ease-in-out infinite; }
+.btn-guide.ok { border-color: var(--green); border-style: solid; background: #14241a; }
+.btn-guide.fail { border-color: var(--red); border-style: solid; background: #2a1818; }
+.btn-guide .big { font-size: 16px; font-weight: 700; }
+.btn-guide .countdown { font-size: 13px; color: var(--muted); margin-top: 4px; }
 
 footer {
   text-align: center; color: var(--muted); font-size: 12px;

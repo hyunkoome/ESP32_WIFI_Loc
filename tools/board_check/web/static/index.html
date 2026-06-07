@@ -8,7 +8,13 @@
 </head>
 <body>
   <header>
-    <h1>🔧 ESP32-S3 보드 진단 대시보드</h1>
+    <div class="brand">
+      <span class="logo">🔧</span>
+      <div>
+        <h1>ESP32-S3 보드 진단 대시보드</h1>
+        <div class="subtitle">USB · Flash · PSRAM · WiFi · BLE · 온도 · GPIO · LED · 버튼 자동 검사</div>
+      </div>
+    </div>
     <div id="fw-status" class="badge">펌웨어 확인 중…</div>
   </header>
 
@@ -16,49 +22,68 @@
     <!-- 보드 선택 -->
     <section class="panel">
       <div class="panel-head">
-        <h2>연결된 보드</h2>
-        <button id="btn-refresh" class="btn">↻ 새로고침</button>
+        <h2>🔌 연결된 보드</h2>
+        <button id="btn-refresh" class="btn secondary">↻ 새로고침</button>
       </div>
       <div id="board-list" class="board-list">탐색 중…</div>
     </section>
 
-    <!-- 진행 로그 -->
+    <!-- 진행 상황 (시각화) -->
     <section class="panel" id="progress-panel" hidden>
-      <div class="panel-head"><h2>진행 상황</h2></div>
-      <div id="progress" class="progress"></div>
+      <div class="progress-head">
+        <span class="spinner" id="spinner"></span>
+        <div class="progress-text">
+          <div id="phase-text">진단 준비 중…</div>
+          <div id="phase-sub" class="muted">보드 flash + 검사로 20~40초 걸립니다</div>
+        </div>
+        <div id="elapsed" class="elapsed">0초</div>
+      </div>
+      <div class="progress-bar"><div class="progress-bar-fill" id="bar-fill"></div></div>
+      <div class="steps" id="steps"></div>
     </section>
 
     <!-- 결과 -->
     <section class="panel" id="result-panel" hidden>
-      <div class="panel-head">
-        <h2>진단 결과 <span id="overall-badge"></span></h2>
+      <!-- 요약 바 -->
+      <div class="summary">
+        <div class="summary-left">
+          <span id="overall-badge" class="overall"></span>
+          <div class="counts" id="counts"></div>
+        </div>
         <div class="live-controls">
+          <span class="led-label">RGB LED</span>
           <span id="led-indicator" class="led-dot" title="RGB LED 순환"></span>
-          <button id="btn-live" class="btn" disabled>▶ 라이브 모니터</button>
+          <button id="btn-live" class="btn secondary" disabled>⏸ 라이브 중지</button>
         </div>
       </div>
 
       <div id="board-info" class="board-info"></div>
 
-      <!-- 검사 항목 (녹색/적색 동그라미) -->
-      <div id="checks" class="checks"></div>
+      <!-- BOOT 버튼 가이드 -->
+      <div id="btn-guide" class="btn-guide" hidden>
+        <div class="big" id="btn-guide-title">🔘 BOOT 버튼을 눌러보세요</div>
+        <div class="countdown" id="btn-guide-sub">보드의 BOOT 버튼을 누르면 여기 표시됩니다</div>
+      </div>
+
+      <!-- 검사 항목 (아이콘 카드 그리드) -->
+      <div id="checks" class="checks-grid"></div>
 
       <!-- WiFi AP 목록 -->
       <div class="sublist-box" id="wifi-box" hidden>
-        <h3>📶 WiFi 스캔 목록</h3>
+        <h3>📶 WiFi 스캔 목록 <span class="count-pill" id="wifi-count"></span></h3>
         <div id="wifi-list" class="scan-list"></div>
       </div>
 
       <!-- BLE 기기 목록 -->
       <div class="sublist-box" id="ble-box" hidden>
-        <h3>🔵 Bluetooth LE 기기</h3>
+        <h3>🔵 Bluetooth LE 기기 <span class="count-pill" id="ble-count"></span></h3>
         <div id="ble-list" class="scan-list"></div>
       </div>
     </section>
   </main>
 
   <footer>
-    <span>ESP32_WIFI_Loc · 보드 자동 진단 (웹)</span>
+    <span>ESP32_WIFI_Loc · 보드 자동 진단 (웹 대시보드)</span>
   </footer>
 
   <script src="/static/app.js"></script>
