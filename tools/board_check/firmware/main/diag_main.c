@@ -111,10 +111,13 @@ static void report_psram(char *out, size_t n)
 /*  - led_strip(RMT 백엔드)로 LED를 초기화하고 R->G->B 순서로 점등한다.    */
 /*  - 초기화/점등 API가 모두 성공하면 ok=true. 실제 발광은 육안 확인용.    */
 /* ----------------------------------------------------------------------- */
+/* RGB LED(WS2812) 핸들. 초기 점등 검사 후에도 해제하지 않고 유지해, app_main
+ * 루프에서 계속 순환 점등(R->G->B->R...)하는 데 재사용한다. 초기화 실패 시 NULL. */
+static led_strip_handle_t g_led_strip = NULL;
+
 static void report_led(char *out, size_t n)
 {
     int ok = 0;
-    led_strip_handle_t strip = NULL;
 
     led_strip_config_t strip_cfg = {
         .strip_gpio_num = RGB_LED_GPIO,
@@ -129,22 +132,22 @@ static void report_led(char *out, size_t n)
         .flags = { .with_dma = false },
     };
 
-    esp_err_t err = led_strip_new_rmt_device(&strip_cfg, &rmt_cfg, &strip);
-    if (err == ESP_OK && strip != NULL) {
+    esp_err_t err = led_strip_new_rmt_device(&strip_cfg, &rmt_cfg, &g_led_strip);
+    if (err == ESP_OK && g_led_strip != NULL) {
         ok = 1;
-        /* 낮은 밝기(30/255)로 R -> G -> B 순차 점등. */
+        /* 초기 R -> G -> B 순차 점등(낮은 밝기 30/255)으로 육안 확인.
+         * led_strip_del 하지 않고 핸들을 유지해, app_main 루프가 계속 순환시킨다. */
         const uint8_t colors[3][3] = {
             {30, 0, 0}, {0, 30, 0}, {0, 0, 30},
         };
         for (int i = 0; i < 3; i++) {
-            led_strip_set_pixel(strip, 0, colors[i][0], colors[i][1], colors[i][2]);
-            led_strip_refresh(strip);
+            led_strip_set_pixel(g_led_strip, 0, colors[i][0], colors[i][1], colors[i][2]);
+            led_strip_refresh(g_led_strip);
             vTaskDelay(pdMS_TO_TICKS(250));
         }
-        led_strip_clear(strip);
-        led_strip_del(strip);
     } else {
         ESP_LOGE(TAG, "LED init failed: %s", esp_err_to_name(err));
+        g_led_strip = NULL;
     }
 
     /* DIAG_LED {"ok":true,"gpio":48} */
@@ -278,6 +281,12 @@ void app_main(void)
      * (DIAG_START ... DIAG_DONE)을 받을 수 있도록 한다. 호스트(firmware.py)는
      * DIAG_START 를 본 뒤의 DIAG_DONE 만 완전한 사이클로 인정한다.
      */
+    /* RGB LED 순환용 색 테이블(R->G->B). 매 사이클 한 단계씩 전진시킨다. */
+    const uint8_t cycle_colors[3][3] = {
+        {30, 0, 0}, {0, 30, 0}, {0, 0, 30},
+    };
+    int color_idx = 0;
+
     while (1) {
         printf("\nDIAG_START\n");
         printf("%s\n", chip_line);
@@ -287,6 +296,19 @@ void app_main(void)
         printf("%s\n", wifi_line);
         printf("DIAG_DONE\n");
         fflush(stdout);
+
+        /* RGB LED 를 계속 순환 점등(R->G->B->R...)해 동작을 눈으로 쉽게 확인한다.
+         * (PWR LED 는 하드웨어 전원 표시등이라 제어 불가, TX LED 는 위 시리얼
+         *  출력 때마다 자동으로 깜빡인다.) */
+        if (g_led_strip != NULL) {
+            led_strip_set_pixel(g_led_strip, 0,
+                                cycle_colors[color_idx][0],
+                                cycle_colors[color_idx][1],
+                                cycle_colors[color_idx][2]);
+            led_strip_refresh(g_led_strip);
+            color_idx = (color_idx + 1) % 3;
+        }
+
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
