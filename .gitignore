@@ -17,6 +17,8 @@ env/             # 환경변수 파일 디렉터리(설정값)는 커밋 금지
 .env
 *.env
 !*.env.example       # 예시 파일은 허용
+# WiFi 자격증명이 주입된 빌드용 헤더(step01 이 config.yaml 에서 생성) — 비밀 포함
+tools/board_check/firmware/main/wifi_credentials.h
 # config.yaml 은 사용자 요청으로 commit 포함 (자격증명 포함 주의)
 config.yaml.example  # 예시 파일
 

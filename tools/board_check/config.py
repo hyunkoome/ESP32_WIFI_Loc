@@ -58,7 +58,9 @@ FIRMWARE_MONITOR_BAUD = 115200
 SERIAL_OPEN_TIMEOUT = 2.0       # UART 포트 open 시도 타임아웃
 ESPTOOL_TIMEOUT = 30.0          # esptool 단일 명령 타임아웃
 FIRMWARE_FLASH_TIMEOUT = 120.0  # 진단 펌웨어 flash 타임아웃
-FIRMWARE_MONITOR_TIMEOUT = 25.0 # 진단 펌웨어 출력 대기 타임아웃
+# 진단 펌웨어 출력 대기 타임아웃. 부팅 후 검사를 1회 수행한 뒤 첫 사이클을
+# 출력하는데, WiFi 접속 테스트(최대 ~12초)까지 끝나야 하므로 넉넉히 둔다.
+FIRMWARE_MONITOR_TIMEOUT = 45.0
 
 # ---------------------------------------------------------------------------
 # 경로
@@ -92,6 +94,7 @@ CHECK_LABELS = {
     "rgb_led": "RGB LED",
     "boot_button": "BOOT Button",
     "wifi_scan": "WiFi Scan",
+    "wifi_connect": "WiFi Connect",
     "temperature": "Temperature",
     "gpio": "GPIO",
 }

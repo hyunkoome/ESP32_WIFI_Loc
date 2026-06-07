@@ -110,6 +110,7 @@ def read_diagnostics(
     result: Dict[str, object] = {
         "psram": None,
         "wifi": None,
+        "wifi_connect": None,
         "chip": None,
         "led": None,
         "button": None,
@@ -129,6 +130,20 @@ def read_diagnostics(
     # 호스트가 flash 직후 시리얼을 늦게 열어 앞쪽 라인(특히 DIAG_PSRAM)을 놓치는
     # race 를 피하려고, "DIAG_START 를 본 뒤의 DIAG_DONE" 한 사이클만 완전한 결과로
     # 인정한다. 중간부터 받은 부분 사이클은 버리고 다음 DIAG_START 를 기다린다.
+    # 태그 → 결과 필드 매핑. 라인의 첫 토큰(공백 전)과 "정확히" 비교하므로
+    # DIAG_WIFI 와 DIAG_WIFI_CONNECT 처럼 접두사가 겹쳐도 안전하다.
+    tag_map = {
+        "DIAG_PSRAM": "psram",
+        "DIAG_WIFI": "wifi",
+        "DIAG_WIFI_CONNECT": "wifi_connect",
+        "DIAG_CHIP": "chip",
+        "DIAG_LED": "led",
+        "DIAG_BUTTON": "button",
+        "DIAG_TEMP": "temp",
+        "DIAG_GPIO": "gpio",
+    }
+    data_fields = tuple(tag_map.values())
+
     saw_start = False
     try:
         ser = serial.Serial(port, baudrate=baud, timeout=1.0)
@@ -138,34 +153,25 @@ def read_diagnostics(
             if not line:
                 continue
             buffer.append(line)
+            tag, _, payload = line.partition(" ")
             # 새 사이클 시작: 이전(부분) 사이클 결과를 초기화하고 수집을 다시 시작.
-            if line.startswith("DIAG_START"):
+            if tag == "DIAG_START":
                 saw_start = True
-                for field in ("psram", "wifi", "chip", "led", "button", "temp", "gpio"):
+                for field in data_fields:
                     result[field] = None
                 continue
-            # "DIAG_KEY {json}" 형태만 처리.
-            for key, field in (
-                ("DIAG_PSRAM", "psram"),
-                ("DIAG_WIFI", "wifi"),
-                ("DIAG_CHIP", "chip"),
-                ("DIAG_LED", "led"),
-                ("DIAG_BUTTON", "button"),
-                ("DIAG_TEMP", "temp"),
-                ("DIAG_GPIO", "gpio"),
-            ):
-                if line.startswith(key):
-                    payload = line[len(key):].strip()
-                    try:
-                        result[field] = json.loads(payload)
-                    except Exception:
-                        result[field] = {"parse_error": payload}
+            field = tag_map.get(tag)
+            if field:
+                try:
+                    result[field] = json.loads(payload)
+                except Exception:
+                    result[field] = {"parse_error": payload}
             # DIAG_START 를 본 뒤의 DONE 만 완전한 사이클로 인정.
-            if line.startswith("DIAG_DONE") and saw_start:
+            if tag == "DIAG_DONE" and saw_start:
                 result["done"] = True
                 break
         if not result["done"] and not any(
-            result[k] for k in ("psram", "wifi", "chip", "led", "button", "temp", "gpio")
+            result[k] for k in data_fields
         ):
             result["error"] = (
                 "펌웨어 출력(DIAG_*)을 받지 못했습니다. "
@@ -195,6 +201,7 @@ def run_firmware_diagnostics(port: str, use_sudo: bool = False) -> Dict[str, obj
         return {
             "psram": None,
             "wifi": None,
+            "wifi_connect": None,
             "chip": None,
             "led": None,
             "button": None,

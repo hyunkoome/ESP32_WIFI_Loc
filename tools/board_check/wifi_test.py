@@ -110,3 +110,57 @@ def evaluate_wifi(
             f"주변에 AP가 없거나 WiFi 라디오 이상 가능."
         )
     return result
+
+
+def evaluate_wifi_connect(
+    firmware_diag: Optional[Dict[str, object]],
+) -> Dict[str, object]:
+    """펌웨어의 WiFi 접속 테스트 결과(config.yaml AP 로 실제 연결)를 해석.
+
+    - 자격증명 미설정(attempted=false) → SKIP
+    - 접속 성공(IP 획득) → PASS
+    - 접속 실패 → FAIL (비밀번호 오류/범위 밖/AP 이상 등)
+    """
+    result: Dict[str, object] = {
+        "status": config.STATUS_SKIP,
+        "connected": None,
+        "ssid": None,
+        "ip": None,
+        "detail": "",
+    }
+
+    if firmware_diag is None:
+        result["detail"] = (
+            "진단 펌웨어 미사용 — WiFi 접속 검사를 건너뜀 "
+            "(--firmware 옵션 및 firmware/ 빌드 필요)"
+        )
+        return result
+
+    conn = firmware_diag.get("wifi_connect")
+    if not conn or "attempted" not in conn:
+        err = firmware_diag.get("error") or "펌웨어 WiFi 접속 결과 없음"
+        result["detail"] = f"WiFi 접속 결과를 받지 못함: {err}"
+        return result
+
+    if not conn.get("attempted"):
+        result["detail"] = (
+            "config.yaml 에 wifi.ssid/password 미설정 — 접속 테스트 생략 "
+            "(설정 후 step01 재빌드 시 검사)"
+        )
+        return result
+
+    ssid = conn.get("ssid")
+    result["ssid"] = ssid
+    if conn.get("connected"):
+        ip = conn.get("ip")
+        result["connected"] = True
+        result["ip"] = ip
+        result["status"] = config.STATUS_PASS
+        result["detail"] = f"'{ssid}' 접속 성공 — IP {ip}"
+    else:
+        result["connected"] = False
+        result["status"] = config.STATUS_FAIL
+        result["detail"] = (
+            f"'{ssid}' 접속 실패 — 비밀번호 오류/신호 약함/AP 이상 가능"
+        )
+    return result

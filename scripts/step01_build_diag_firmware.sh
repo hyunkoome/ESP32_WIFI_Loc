@@ -58,6 +58,13 @@ echo "[1/3] ESP-IDF 환경 활성화: ${IDF_DIR}"
 # shellcheck disable=SC1091
 source "${IDF_DIR}/export.sh" >/dev/null
 
+# --- 2.5) WiFi 접속 테스트용 자격증명 헤더 생성 ------------------------------
+# config.yaml 의 wifi.ssid/password 를 읽어 main/wifi_credentials.h 로 주입한다.
+# (없으면 빈 값 → 펌웨어가 WiFi 접속 테스트를 SKIP)
+echo "[2.5/3] WiFi 자격증명 헤더 생성 (config.yaml → main/wifi_credentials.h)"
+python3 "${SCRIPT_DIR}/gen_wifi_creds.py" \
+    "${REPO_DIR}/config.yaml" "${FW_DIR}/main/wifi_credentials.h"
+
 # --- 3) 빌드 ------------------------------------------------------------------
 cd "${FW_DIR}"
 # 항상 "완전" 클린 빌드한다: 빌드 폴더(build/)와 자동 복원되는 managed_components/ 를

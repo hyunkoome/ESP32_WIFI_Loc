@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/task.h"
 
 #include "driver/gpio.h"
@@ -45,6 +46,19 @@
 #if __has_include("esp_psram.h")
 #include "esp_psram.h"
 #define HAVE_ESP_PSRAM 1
+#endif
+
+/* WiFi 접속 테스트용 자격증명. step01_build_diag_firmware.sh 가 config.yaml 에서
+ * 읽어 wifi_credentials.h 로 생성한다(빌드 시 주입, gitignore 처리). 헤더가 없거나
+ * 값이 비어 있으면 접속 테스트는 생략(SKIP)된다. */
+#if __has_include("wifi_credentials.h")
+#include "wifi_credentials.h"
+#endif
+#ifndef DIAG_WIFI_SSID
+#define DIAG_WIFI_SSID ""
+#endif
+#ifndef DIAG_WIFI_PASSWORD
+#define DIAG_WIFI_PASSWORD ""
 #endif
 
 static const char *TAG = "diag";
@@ -279,6 +293,91 @@ fail:
 }
 
 /* ----------------------------------------------------------------------- */
+/* WiFi 접속 테스트 (config.yaml 자격증명)                                 */
+/*  - report_wifi() 가 STA 모드로 WiFi 를 이미 start 한 상태에서 호출된다.  */
+/*  - DIAG_WIFI_SSID 가 비어 있으면(자격증명 미설정) attempted=false 로     */
+/*    보고하고 생략. 설정돼 있으면 접속 시도 후 IP 획득 여부를 보고한다.    */
+/* ----------------------------------------------------------------------- */
+#define WIFI_CONN_OK_BIT   BIT0
+#define WIFI_CONN_FAIL_BIT BIT1
+
+static EventGroupHandle_t s_wifi_conn_eg;
+static char s_wifi_ip[16];
+static int s_wifi_retry;
+
+static void wifi_conn_event_handler(void *arg, esp_event_base_t base,
+                                    int32_t id, void *data)
+{
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        /* 최대 3회 재시도 후 실패 처리(잘못된 비밀번호/범위 밖 등). */
+        if (s_wifi_retry < 3) {
+            s_wifi_retry++;
+            esp_wifi_connect();
+        } else {
+            xEventGroupSetBits(s_wifi_conn_eg, WIFI_CONN_FAIL_BIT);
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
+        snprintf(s_wifi_ip, sizeof(s_wifi_ip), IPSTR, IP2STR(&event->ip_info.ip));
+        xEventGroupSetBits(s_wifi_conn_eg, WIFI_CONN_OK_BIT);
+    }
+}
+
+static void report_wifi_connect(char *out, size_t n)
+{
+    const char *ssid = DIAG_WIFI_SSID;
+    const char *pw = DIAG_WIFI_PASSWORD;
+
+    /* 자격증명 미설정 — 접속 테스트 생략(호스트가 SKIP 처리). */
+    if (ssid[0] == '\0') {
+        snprintf(out, n, "DIAG_WIFI_CONNECT {\"attempted\":false}");
+        return;
+    }
+
+    s_wifi_conn_eg = xEventGroupCreate();
+    s_wifi_retry = 0;
+    s_wifi_ip[0] = '\0';
+
+    esp_event_handler_instance_t inst_wifi, inst_ip;
+    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                        &wifi_conn_event_handler, NULL, &inst_wifi);
+    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                        &wifi_conn_event_handler, NULL, &inst_ip);
+
+    wifi_config_t wc = { 0 };
+    strncpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid) - 1);
+    strncpy((char *)wc.sta.password, pw, sizeof(wc.sta.password) - 1);
+    esp_wifi_set_config(WIFI_IF_STA, &wc);
+    esp_wifi_connect();
+
+    /* IP 획득 또는 실패까지 최대 ~12초 대기. */
+    EventBits_t bits = xEventGroupWaitBits(
+        s_wifi_conn_eg, WIFI_CONN_OK_BIT | WIFI_CONN_FAIL_BIT,
+        pdFALSE, pdFALSE, pdMS_TO_TICKS(12000));
+
+    char ssid_esc[80];
+    json_escape(ssid, ssid_esc, sizeof(ssid_esc));
+    if (bits & WIFI_CONN_OK_BIT) {
+        /* DIAG_WIFI_CONNECT {"attempted":true,"connected":true,"ssid":"..","ip":"x.x.x.x"} */
+        snprintf(out, n,
+                 "DIAG_WIFI_CONNECT {\"attempted\":true,\"connected\":true,"
+                 "\"ssid\":\"%s\",\"ip\":\"%s\"}",
+                 ssid_esc, s_wifi_ip);
+    } else {
+        snprintf(out, n,
+                 "DIAG_WIFI_CONNECT {\"attempted\":true,\"connected\":false,"
+                 "\"ssid\":\"%s\",\"ip\":null}",
+                 ssid_esc);
+    }
+
+    /* 정리. */
+    esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, inst_ip);
+    esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, inst_wifi);
+    esp_wifi_disconnect();
+    vEventGroupDelete(s_wifi_conn_eg);
+}
+
+/* ----------------------------------------------------------------------- */
 /* 내장 온도센서                                                           */
 /*  - ESP32-S3 내장 temperature sensor 를 설치/활성화해 칩 온도를 읽는다.  */
 /*  - 동작 자체(설치+읽기 성공) 확인이 목적. 절대값은 칩 다이 온도라 실온  */
@@ -404,6 +503,7 @@ void app_main(void)
     static char led_line[160];
     static char button_line[160];
     static char wifi_line[2048];  /* AP 목록(ssid/rssi/ch)까지 담으므로 크게 */
+    static char wifi_conn_line[200];
     static char temp_line[160];
     static char gpio_line[200];
 
@@ -412,6 +512,7 @@ void app_main(void)
     report_led(led_line, sizeof(led_line));
     report_button(button_line, sizeof(button_line));
     report_wifi(wifi_line, sizeof(wifi_line));
+    report_wifi_connect(wifi_conn_line, sizeof(wifi_conn_line));
     report_temp(temp_line, sizeof(temp_line));
     report_gpio(gpio_line, sizeof(gpio_line));
 
@@ -433,6 +534,7 @@ void app_main(void)
         printf("%s\n", led_line);
         printf("%s\n", button_line);
         printf("%s\n", wifi_line);
+        printf("%s\n", wifi_conn_line);
         printf("%s\n", temp_line);
         printf("%s\n", gpio_line);
         printf("DIAG_DONE\n");
