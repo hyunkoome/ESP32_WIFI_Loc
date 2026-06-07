@@ -1,8 +1,9 @@
 /*
  * diag_main.c
  * ===========
- * ESP32-S3 진단 펌웨어. 부팅하면 다음을 수행하고 결과를 시리얼(UART/USB)로
- * 출력한 뒤 무한 대기한다. 호스트(firmware.py)가 이 출력을 파싱한다.
+ * ESP32-S3 진단 펌웨어. 부팅하면 아래 검사를 "한 번만" 수행해 결과 문자열을
+ * 만들어 두고, 그 결과를 시리얼(UART/USB)로 "주기적으로 반복" 출력한다.
+ * 호스트(firmware.py)가 이 출력을 파싱한다.
  *
  *   1) 칩 정보(코어 수/모델)        -> DIAG_CHIP   {...}
  *   2) PSRAM 존재/용량              -> DIAG_PSRAM  {...}
@@ -10,6 +11,12 @@
  *   4) BOOT 버튼(GPIO0) 입력 확인   -> DIAG_BUTTON {...}
  *   5) WiFi AP 스캔(개수/최강 RSSI) -> DIAG_WIFI   {...}
  *   6) 완료 표시                    -> DIAG_DONE
+ *
+ * 한 사이클은 "DIAG_START -> 각 결과 라인 -> DIAG_DONE" 이며, 약 2초마다 반복된다.
+ * 이렇게 반복 출력하는 이유: flash 직후 보드가 재부팅하며 결과를 즉시 뱉는데,
+ * 호스트가 그 시점에 아직 시리얼을 열지 못했으면 앞쪽 라인(특히 DIAG_PSRAM)을
+ * 놓친다. 반복 출력하면 호스트가 언제 연결하든 완전한 한 사이클을 받을 수 있다.
+ * (검사 자체는 부팅 시 1회만 수행하므로 LED 는 한 번만 점등, WiFi 도 1회만 스캔.)
  *
  * 출력 형식은 "DIAG_<KEY> <json>\n" 한 줄. 파싱이 쉽도록 일반 로그(ESP_LOGI)는
  * 최소화하고 결과 라인은 printf로 직접 출력한다.
@@ -51,7 +58,7 @@ static const char *TAG = "diag";
 /* ----------------------------------------------------------------------- */
 /* 칩 정보 출력                                                            */
 /* ----------------------------------------------------------------------- */
-static void report_chip(void)
+static void report_chip(char *out, size_t n)
 {
     esp_chip_info_t info;
     esp_chip_info(&info);
@@ -65,14 +72,14 @@ static void report_chip(void)
         default:           model = "UNKNOWN";  break;
     }
     /* DIAG_CHIP {"cores":2,"model":"ESP32-S3","revision":2} */
-    printf("DIAG_CHIP {\"cores\":%d,\"model\":\"%s\",\"revision\":%d}\n",
-           info.cores, model, info.revision);
+    snprintf(out, n, "DIAG_CHIP {\"cores\":%d,\"model\":\"%s\",\"revision\":%d}",
+             info.cores, model, info.revision);
 }
 
 /* ----------------------------------------------------------------------- */
 /* PSRAM 검사                                                              */
 /* ----------------------------------------------------------------------- */
-static void report_psram(void)
+static void report_psram(char *out, size_t n)
 {
     size_t psram_size = 0;
     int present = 0;
@@ -95,8 +102,8 @@ static void report_psram(void)
     }
 
     /* DIAG_PSRAM {"present":true,"size":8388608} */
-    printf("DIAG_PSRAM {\"present\":%s,\"size\":%u}\n",
-           present ? "true" : "false", (unsigned)psram_size);
+    snprintf(out, n, "DIAG_PSRAM {\"present\":%s,\"size\":%u}",
+             present ? "true" : "false", (unsigned)psram_size);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -104,7 +111,7 @@ static void report_psram(void)
 /*  - led_strip(RMT 백엔드)로 LED를 초기화하고 R->G->B 순서로 점등한다.    */
 /*  - 초기화/점등 API가 모두 성공하면 ok=true. 실제 발광은 육안 확인용.    */
 /* ----------------------------------------------------------------------- */
-static void report_led(void)
+static void report_led(char *out, size_t n)
 {
     int ok = 0;
     led_strip_handle_t strip = NULL;
@@ -141,7 +148,7 @@ static void report_led(void)
     }
 
     /* DIAG_LED {"ok":true,"gpio":48} */
-    printf("DIAG_LED {\"ok\":%s,\"gpio\":%d}\n", ok ? "true" : "false", RGB_LED_GPIO);
+    snprintf(out, n, "DIAG_LED {\"ok\":%s,\"gpio\":%d}", ok ? "true" : "false", RGB_LED_GPIO);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -149,7 +156,7 @@ static void report_led(void)
 /*  - 내부 풀업으로 입력 설정 후 유휴 레벨을 읽는다(정상이면 1).           */
 /*  - 짧은 윈도우 동안 눌림(0)도 감지해 부가 정보로 보고한다.             */
 /* ----------------------------------------------------------------------- */
-static void report_button(void)
+static void report_button(char *out, size_t n)
 {
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << BOOT_BUTTON_GPIO,
@@ -173,14 +180,14 @@ static void report_button(void)
     }
 
     /* DIAG_BUTTON {"idle_level":1,"pressed_now":false,"gpio":0} */
-    printf("DIAG_BUTTON {\"idle_level\":%d,\"pressed_now\":%s,\"gpio\":%d}\n",
-           idle, pressed ? "true" : "false", BOOT_BUTTON_GPIO);
+    snprintf(out, n, "DIAG_BUTTON {\"idle_level\":%d,\"pressed_now\":%s,\"gpio\":%d}",
+             idle, pressed ? "true" : "false", BOOT_BUTTON_GPIO);
 }
 
 /* ----------------------------------------------------------------------- */
 /* WiFi AP 스캔                                                            */
 /* ----------------------------------------------------------------------- */
-static void report_wifi(void)
+static void report_wifi(char *out, size_t n)
 {
     int ap_count = -1;
     int strongest = 0;
@@ -222,17 +229,17 @@ static void report_wifi(void)
 
     /* DIAG_WIFI {"ap_count":15,"strongest_rssi":-42} */
     if (have_rssi) {
-        printf("DIAG_WIFI {\"ap_count\":%d,\"strongest_rssi\":%d}\n",
-               ap_count, strongest);
+        snprintf(out, n, "DIAG_WIFI {\"ap_count\":%d,\"strongest_rssi\":%d}",
+                 ap_count, strongest);
     } else {
-        printf("DIAG_WIFI {\"ap_count\":%d,\"strongest_rssi\":null}\n", ap_count);
+        snprintf(out, n, "DIAG_WIFI {\"ap_count\":%d,\"strongest_rssi\":null}", ap_count);
     }
     return;
 
 fail:
     ESP_LOGE(TAG, "WiFi scan failed: %s", esp_err_to_name(err));
-    printf("DIAG_WIFI {\"ap_count\":0,\"strongest_rssi\":null,\"error\":\"%s\"}\n",
-           esp_err_to_name(err));
+    snprintf(out, n, "DIAG_WIFI {\"ap_count\":0,\"strongest_rssi\":null,\"error\":\"%s\"}",
+             esp_err_to_name(err));
 }
 
 /* ----------------------------------------------------------------------- */
@@ -248,20 +255,38 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    /* 호스트 파서가 시작을 인지할 수 있도록 약간 대기 후 출력. */
+    /* 부팅 직후 약간 대기(주변장치 안정화). */
     vTaskDelay(pdMS_TO_TICKS(300));
 
-    printf("\nDIAG_START\n");
-    report_chip();
-    report_psram();
-    report_led();
-    report_button();
-    report_wifi();
-    printf("DIAG_DONE\n");
-    fflush(stdout);
+    /* --- 검사는 한 번만 수행하고 결과 문자열을 보관한다. ---
+     * LED 는 한 번만 점등, WiFi 도 한 번만 스캔한다(아래 반복 루프에서 재실행 안 함).
+     */
+    static char chip_line[160];
+    static char psram_line[160];
+    static char led_line[160];
+    static char button_line[160];
+    static char wifi_line[200];
 
-    /* 결과 출력 후 유휴 상태로 대기. */
+    report_chip(chip_line, sizeof(chip_line));
+    report_psram(psram_line, sizeof(psram_line));
+    report_led(led_line, sizeof(led_line));
+    report_button(button_line, sizeof(button_line));
+    report_wifi(wifi_line, sizeof(wifi_line));
+
+    /* --- 보관한 결과를 약 2초마다 반복 출력한다. ---
+     * flash 직후 호스트가 언제 시리얼을 열든 완전한 한 사이클
+     * (DIAG_START ... DIAG_DONE)을 받을 수 있도록 한다. 호스트(firmware.py)는
+     * DIAG_START 를 본 뒤의 DIAG_DONE 만 완전한 사이클로 인정한다.
+     */
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        printf("\nDIAG_START\n");
+        printf("%s\n", chip_line);
+        printf("%s\n", psram_line);
+        printf("%s\n", led_line);
+        printf("%s\n", button_line);
+        printf("%s\n", wifi_line);
+        printf("DIAG_DONE\n");
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }

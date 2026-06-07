@@ -123,6 +123,11 @@ def read_diagnostics(
 
     buffer = []
     ser = None
+    # 펌웨어는 결과 사이클(DIAG_START ... DIAG_DONE)을 약 2초마다 반복 출력한다.
+    # 호스트가 flash 직후 시리얼을 늦게 열어 앞쪽 라인(특히 DIAG_PSRAM)을 놓치는
+    # race 를 피하려고, "DIAG_START 를 본 뒤의 DIAG_DONE" 한 사이클만 완전한 결과로
+    # 인정한다. 중간부터 받은 부분 사이클은 버리고 다음 DIAG_START 를 기다린다.
+    saw_start = False
     try:
         ser = serial.Serial(port, baudrate=baud, timeout=1.0)
         deadline = time.monotonic() + timeout
@@ -131,6 +136,12 @@ def read_diagnostics(
             if not line:
                 continue
             buffer.append(line)
+            # 새 사이클 시작: 이전(부분) 사이클 결과를 초기화하고 수집을 다시 시작.
+            if line.startswith("DIAG_START"):
+                saw_start = True
+                for field in ("psram", "wifi", "chip", "led", "button"):
+                    result[field] = None
+                continue
             # "DIAG_KEY {json}" 형태만 처리.
             for key, field in (
                 ("DIAG_PSRAM", "psram"),
@@ -145,7 +156,8 @@ def read_diagnostics(
                         result[field] = json.loads(payload)
                     except Exception:
                         result[field] = {"parse_error": payload}
-            if line.startswith("DIAG_DONE"):
+            # DIAG_START 를 본 뒤의 DONE 만 완전한 사이클로 인정.
+            if line.startswith("DIAG_DONE") and saw_start:
                 result["done"] = True
                 break
         if not result["done"] and not any(
