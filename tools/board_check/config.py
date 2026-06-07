@@ -89,6 +89,8 @@ CHECK_LABELS = {
     "flash_access": "Flash Access",
     "flash_size": "Flash Size",
     "psram": "PSRAM",
+    "rgb_led": "RGB LED",
+    "boot_button": "BOOT Button",
     "wifi_scan": "WiFi Scan",
 }
 
@@ -140,3 +142,39 @@ def ensure_results_dir() -> Path:
     """결과 저장 디렉터리를 생성(이미 있으면 무시)하고 경로를 반환."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     return RESULTS_DIR
+
+
+# ---------------------------------------------------------------------------
+# 사용자 설정 파일 (config.yaml)
+# ---------------------------------------------------------------------------
+# 저장소 루트의 config.yaml 에서 WiFi 자격증명 등 환경 의존 값을 읽는다.
+# config.yaml 은 자격증명을 포함하므로 gitignore 처리되며, config.yaml.example
+# 을 복사해 만든다. PyYAML 미설치/파일 부재 시에는 빈 설정으로 폴백한다.
+PROJECT_ROOT = BASE_DIR.parent.parent
+USER_CONFIG_YAML = PROJECT_ROOT / "config.yaml"
+
+try:
+    import yaml  # PyYAML
+except Exception:  # pragma: no cover
+    yaml = None  # type: ignore
+
+
+def load_user_config() -> dict:
+    """config.yaml 을 읽어 딕셔너리로 반환. 없거나 PyYAML 미설치면 빈 dict."""
+    if yaml is None or not USER_CONFIG_YAML.exists():
+        return {}
+    try:
+        with open(USER_CONFIG_YAML, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def wifi_credentials() -> tuple[str | None, str | None]:
+    """config.yaml 의 wifi.ssid / wifi.password 를 (ssid, password) 로 반환."""
+    cfg = load_user_config()
+    wifi = cfg.get("wifi") or {}
+    if not isinstance(wifi, dict):
+        return None, None
+    return wifi.get("ssid"), wifi.get("password")

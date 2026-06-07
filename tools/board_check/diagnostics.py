@@ -20,6 +20,7 @@ from typing import Callable, Dict, List, Optional
 import config
 import esptool_wrapper
 import firmware as firmware_mod
+import peripheral_test
 import psram_test
 import serial_check
 import wifi_test
@@ -209,6 +210,24 @@ def diagnose_board(
         size_human=psram_res.get("size_human"),
     )
 
+    # 6-2) RGB LED / BOOT 버튼 — 진단 펌웨어 기반(옵션).
+    led_res = peripheral_test.evaluate_led(fw_diag if use_firmware else None)
+    checks["rgb_led"] = _check(
+        led_res["status"],
+        led_res["detail"],
+        ok=led_res.get("ok"),
+        gpio=led_res.get("gpio"),
+    )
+
+    button_res = peripheral_test.evaluate_button(fw_diag if use_firmware else None)
+    checks["boot_button"] = _check(
+        button_res["status"],
+        button_res["detail"],
+        idle_level=button_res.get("idle_level"),
+        pressed_now=button_res.get("pressed_now"),
+        gpio=button_res.get("gpio"),
+    )
+
     wifi_res = wifi_test.evaluate_wifi(fw_diag if use_firmware else None, min_ap=min_ap)
     checks["wifi_scan"] = _check(
         wifi_res["status"],
@@ -233,9 +252,9 @@ def diagnose_board(
         if checks.get(key, {}).get("status") == config.STATUS_FAIL:
             overall = config.STATUS_FAIL
             break
-    # 펌웨어를 사용했는데 WiFi/PSRAM이 FAIL이면 전체도 FAIL로 격상.
+    # 펌웨어를 사용했는데 PSRAM/LED/버튼/WiFi가 FAIL이면 전체도 FAIL로 격상.
     if use_firmware:
-        for key in ("psram", "wifi_scan"):
+        for key in ("psram", "rgb_led", "boot_button", "wifi_scan"):
             if checks.get(key, {}).get("status") == config.STATUS_FAIL:
                 overall = config.STATUS_FAIL
                 break

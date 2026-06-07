@@ -16,20 +16,22 @@ env/             # 환경변수 파일 디렉터리(설정값)는 커밋 금지
 # ===== 환경변수/비밀값 =====
 .env
 *.env
-!*.env.example   # 예시 파일은 허용
+!*.env.example       # 예시 파일은 허용
+# config.yaml 은 사용자 요청으로 commit 포함 (자격증명 포함 주의)
+config.yaml.example  # 예시 파일
 
 # ===== 진단 도구 산출물 =====
 tools/board_check/results/
 
 # ===== ESP-IDF 빌드 산출물 =====
 build/
-sdkconfig            # 생성물 — sdkconfig.defaults 만 커밋
 sdkconfig.old
+# Component Manager 가 idf_component.yml + dependencies.lock 으로 자동 복원하므로 제외
 managed_components/
-dependencies.lock
 *.bin
 *.elf
 *.map
+# 재현성을 위해 sdkconfig(빌드 설정 고정) 와 dependencies.lock(컴포넌트 버전 고정) 은 커밋한다.
 # 단, YD-ESP32-S3 배포용 MicroPython 펌웨어 bin 은 자산이므로 포함(위 *.bin 예외)
 !hw/YD-ESP32-S3/1-MPY-firmware/*.bin
 
@@ -47,3 +49,6 @@ archive/
 .idea/
 .vscode/
 *.swp
+
+# debug log
+results/

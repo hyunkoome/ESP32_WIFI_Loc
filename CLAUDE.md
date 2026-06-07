@@ -46,6 +46,8 @@ localization, WiFi pose estimation.
 - 비밀값 / 토큰 / 경로 등 환경 의존 값은 **환경변수**로 관리하고, 코드에
   **하드코딩 금지**.
 - `.env`, `env/` 디렉터리는 **절대 commit 금지** (`.gitignore` 처리됨).
+- `config.yaml` 은 사용자 요청으로 **commit 포함**한다(WiFi SSID/비밀번호 등
+  자격증명이 들어갈 수 있으므로, 민감한 값을 넣을 때는 주의).
 - 진단 도구의 상수(VID/PID, 타임아웃, 경로, 검사 항목)는
   `tools/board_check/config.py` 한 곳에 모은다. 값 변경은 가급적 이 파일만.
 

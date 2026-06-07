@@ -38,13 +38,17 @@ def available() -> bool:
     return config.FIRMWARE_BIN.exists()
 
 
-def flash_firmware(port: str, use_sudo: bool = False) -> Dict[str, object]:
+def flash_firmware(
+    port: str, use_sudo: bool = False, erase: bool = True
+) -> Dict[str, object]:
     """
     진단 펌웨어 병합 바이너리를 0x0에 flash.
 
-    반환: {"flashed": bool, "error": str|None}
+    erase=True 면 write 전에 전체 flash 를 지운다(기존 펌웨어를 깨끗이 제거).
+
+    반환: {"flashed": bool, "erased": bool, "error": str|None}
     """
-    result: Dict[str, object] = {"flashed": False, "error": None}
+    result: Dict[str, object] = {"flashed": False, "erased": False, "error": None}
     if not available():
         result["error"] = (
             f"진단 펌웨어가 없습니다: {config.FIRMWARE_BIN}\n"
@@ -52,6 +56,20 @@ def flash_firmware(port: str, use_sudo: bool = False) -> Dict[str, object]:
         )
         return result
 
+    # 1) (옵션) 전체 erase — 기존 펌웨어/데이터를 깨끗이 지우고 다운로드.
+    if erase:
+        rc_e, out_e = run_esptool(
+            port,
+            "erase-flash",
+            use_sudo=use_sudo,
+            timeout=config.FIRMWARE_FLASH_TIMEOUT,
+        )
+        if rc_e != 0:
+            result["error"] = "erase 실패: " + out_e.strip()[-300:]
+            return result
+        result["erased"] = True
+
+    # 2) 병합 바이너리를 0x0 에 write.
     rc, out = run_esptool(
         port,
         "write-flash" if _supports_hyphen_writeflash() else "write_flash",
@@ -93,6 +111,8 @@ def read_diagnostics(
         "psram": None,
         "wifi": None,
         "chip": None,
+        "led": None,
+        "button": None,
         "done": False,
         "error": None,
         "raw": "",
@@ -116,6 +136,8 @@ def read_diagnostics(
                 ("DIAG_PSRAM", "psram"),
                 ("DIAG_WIFI", "wifi"),
                 ("DIAG_CHIP", "chip"),
+                ("DIAG_LED", "led"),
+                ("DIAG_BUTTON", "button"),
             ):
                 if line.startswith(key):
                     payload = line[len(key):].strip()
@@ -127,7 +149,7 @@ def read_diagnostics(
                 result["done"] = True
                 break
         if not result["done"] and not any(
-            result[k] for k in ("psram", "wifi", "chip")
+            result[k] for k in ("psram", "wifi", "chip", "led", "button")
         ):
             result["error"] = (
                 "펌웨어 출력(DIAG_*)을 받지 못했습니다. "
@@ -152,12 +174,14 @@ def run_firmware_diagnostics(port: str, use_sudo: bool = False) -> Dict[str, obj
 
     반환: read_diagnostics() 결과에 flash 정보를 합친 딕셔너리.
     """
-    flash_res = flash_firmware(port, use_sudo=use_sudo)
+    flash_res = flash_firmware(port, use_sudo=use_sudo, erase=True)
     if not flash_res["flashed"]:
         return {
             "psram": None,
             "wifi": None,
             "chip": None,
+            "led": None,
+            "button": None,
             "done": False,
             "error": flash_res["error"],
             "raw": "",

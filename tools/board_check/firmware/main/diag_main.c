@@ -4,10 +4,12 @@
  * ESP32-S3 진단 펌웨어. 부팅하면 다음을 수행하고 결과를 시리얼(UART/USB)로
  * 출력한 뒤 무한 대기한다. 호스트(firmware.py)가 이 출력을 파싱한다.
  *
- *   1) 칩 정보(코어 수/모델)        -> DIAG_CHIP  {...}
- *   2) PSRAM 존재/용량              -> DIAG_PSRAM {...}
- *   3) WiFi AP 스캔(개수/최강 RSSI) -> DIAG_WIFI  {...}
- *   4) 완료 표시                    -> DIAG_DONE
+ *   1) 칩 정보(코어 수/모델)        -> DIAG_CHIP   {...}
+ *   2) PSRAM 존재/용량              -> DIAG_PSRAM  {...}
+ *   3) RGB LED(WS2812) 점등 테스트  -> DIAG_LED    {...}
+ *   4) BOOT 버튼(GPIO0) 입력 확인   -> DIAG_BUTTON {...}
+ *   5) WiFi AP 스캔(개수/최강 RSSI) -> DIAG_WIFI   {...}
+ *   6) 완료 표시                    -> DIAG_DONE
  *
  * 출력 형식은 "DIAG_<KEY> <json>\n" 한 줄. 파싱이 쉽도록 일반 로그(ESP_LOGI)는
  * 최소화하고 결과 라인은 printf로 직접 출력한다.
@@ -21,11 +23,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "driver/gpio.h"
 #include "esp_chip_info.h"
+#include "esp_event.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_netif.h"
 #include "esp_wifi.h"
+#include "led_strip.h"
 #include "nvs_flash.h"
 
 #if __has_include("esp_psram.h")
@@ -37,6 +43,10 @@ static const char *TAG = "diag";
 
 /* 스캔할 최대 AP 개수. */
 #define MAX_AP_RECORDS 32
+
+/* YD-ESP32-S3 (V1.4) 보드 핀 배치. */
+#define RGB_LED_GPIO     48  /* 온보드 WS2812 RGB LED */
+#define BOOT_BUTTON_GPIO 0   /* BOOT 버튼(부팅 후 일반 입력으로 사용 가능) */
 
 /* ----------------------------------------------------------------------- */
 /* 칩 정보 출력                                                            */
@@ -87,6 +97,84 @@ static void report_psram(void)
     /* DIAG_PSRAM {"present":true,"size":8388608} */
     printf("DIAG_PSRAM {\"present\":%s,\"size\":%u}\n",
            present ? "true" : "false", (unsigned)psram_size);
+}
+
+/* ----------------------------------------------------------------------- */
+/* RGB LED(WS2812) 점등 테스트                                             */
+/*  - led_strip(RMT 백엔드)로 LED를 초기화하고 R->G->B 순서로 점등한다.    */
+/*  - 초기화/점등 API가 모두 성공하면 ok=true. 실제 발광은 육안 확인용.    */
+/* ----------------------------------------------------------------------- */
+static void report_led(void)
+{
+    int ok = 0;
+    led_strip_handle_t strip = NULL;
+
+    led_strip_config_t strip_cfg = {
+        .strip_gpio_num = RGB_LED_GPIO,
+        .max_leds = 1,
+        .led_pixel_format = LED_PIXEL_FORMAT_GRB,  /* WS2812 는 GRB 순서 */
+        .led_model = LED_MODEL_WS2812,
+        .flags = { .invert_out = false },
+    };
+    led_strip_rmt_config_t rmt_cfg = {
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = 10 * 1000 * 1000,  /* 10MHz */
+        .flags = { .with_dma = false },
+    };
+
+    esp_err_t err = led_strip_new_rmt_device(&strip_cfg, &rmt_cfg, &strip);
+    if (err == ESP_OK && strip != NULL) {
+        ok = 1;
+        /* 낮은 밝기(30/255)로 R -> G -> B 순차 점등. */
+        const uint8_t colors[3][3] = {
+            {30, 0, 0}, {0, 30, 0}, {0, 0, 30},
+        };
+        for (int i = 0; i < 3; i++) {
+            led_strip_set_pixel(strip, 0, colors[i][0], colors[i][1], colors[i][2]);
+            led_strip_refresh(strip);
+            vTaskDelay(pdMS_TO_TICKS(250));
+        }
+        led_strip_clear(strip);
+        led_strip_del(strip);
+    } else {
+        ESP_LOGE(TAG, "LED init failed: %s", esp_err_to_name(err));
+    }
+
+    /* DIAG_LED {"ok":true,"gpio":48} */
+    printf("DIAG_LED {\"ok\":%s,\"gpio\":%d}\n", ok ? "true" : "false", RGB_LED_GPIO);
+}
+
+/* ----------------------------------------------------------------------- */
+/* BOOT 버튼(GPIO0) 입력 테스트                                            */
+/*  - 내부 풀업으로 입력 설정 후 유휴 레벨을 읽는다(정상이면 1).           */
+/*  - 짧은 윈도우 동안 눌림(0)도 감지해 부가 정보로 보고한다.             */
+/* ----------------------------------------------------------------------- */
+static void report_button(void)
+{
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << BOOT_BUTTON_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io);
+
+    int idle = gpio_get_level(BOOT_BUTTON_GPIO);
+
+    /* 약 0.5초간 눌림 여부 폴링(인터랙션은 선택). */
+    int pressed = 0;
+    for (int i = 0; i < 10; i++) {
+        if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
+            pressed = 1;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    /* DIAG_BUTTON {"idle_level":1,"pressed_now":false,"gpio":0} */
+    printf("DIAG_BUTTON {\"idle_level\":%d,\"pressed_now\":%s,\"gpio\":%d}\n",
+           idle, pressed ? "true" : "false", BOOT_BUTTON_GPIO);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -166,6 +254,8 @@ void app_main(void)
     printf("\nDIAG_START\n");
     report_chip();
     report_psram();
+    report_led();
+    report_button();
     report_wifi();
     printf("DIAG_DONE\n");
     fflush(stdout);

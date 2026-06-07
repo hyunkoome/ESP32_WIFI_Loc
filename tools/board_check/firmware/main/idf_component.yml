@@ -1,0 +1,5 @@
+# ESP-IDF Component Manager 의존성.
+# 빌드 시 아래 컴포넌트를 managed_components/ 로 자동 다운로드한다(인터넷 필요).
+dependencies:
+  # WS2812 RGB LED 제어용 (RMT 백엔드). report_led() 에서 사용.
+  espressif/led_strip: "^2.5.5"

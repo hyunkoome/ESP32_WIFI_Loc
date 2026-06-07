@@ -1,0 +1,8 @@
+# 보드 진단/테스트용 사용자 설정.
+# config.yaml.example 을 복사해 만든 파일이며, 자격증명을 포함하므로
+# 기본적으로 .gitignore 처리됩니다(config.yaml.example 만 커밋).
+
+# WiFi 연결 테스트에 사용할 AP (2.4GHz 대역 — ESP32-S3 는 5GHz 미지원).
+wifi:
+  ssid: "Skylife_STBWifi_2G_CB20"
+  password: "12345678"

@@ -14,6 +14,20 @@
 - 실내 위치 추정(Localization)
 - WiFi 기반 포즈 인식(Pose Estimation)
 
+## 📚 문서
+
+세부 내용은 [`docs/`](docs/) 에 항목별로 정리돼 있습니다.
+
+| 문서 | 내용 |
+|------|------|
+| [설치 가이드](docs/install.md) | venv, 포트 권한, ESP-IDF 설치까지 처음부터 |
+| [Python 환경 두 개](docs/python-environments.md) | 프로젝트 venv vs ESP-IDF venv — 왜 둘이고 언제 뭘 쓰나 |
+| [USB-C 포트 가이드](docs/usb-ports.md) | 왼쪽(USB)/오른쪽(COM) 포트 차이와 사용법 |
+| [펌웨어 가이드](docs/firmware-guide.md) | MicroPython bin 선택·플래시, 진단 펌웨어 |
+| [보드 진단 도구](tools/board_check/README.md) | Phase 1 진단 도구 사용법 |
+| [진단 펌웨어](tools/board_check/firmware/README.md) | PSRAM/WiFi/LED/버튼 검사 펌웨어 빌드 |
+| [보드 하드웨어](hw/YD-ESP32-S3/README.KR.md) | YD-ESP32-S3 데이터시트/핀맵/스펙 |
+
 ## 하드웨어
 
 | 항목 | 사양 |
@@ -23,72 +37,46 @@
 | Flash | 16MB |
 | PSRAM | 8MB (Octal) |
 | 무선 | WiFi 802.11 b/g/n (2.4GHz), BLE 5 |
-| 인터페이스 | USB-C UART / USB-C OTG, USB Serial/JTAG |
+| 인터페이스 | USB-C UART(CH343) / USB-C 네이티브(USB-Serial-JTAG) |
 | 보유 수량 | 3대 (동시 연결 예정) |
 
-## USB-C 포트 (왼쪽 vs 오른쪽)
+- **USB-C 포트가 2개**입니다 — 평소엔 오른쪽(`COM`) 하나만 쓰면 됩니다. 자세히:
+  [USB-C 포트 가이드](docs/usb-ports.md)
+- **펌웨어**: 이 보드는 N16R8 이므로 `...-N16R8-...` 펌웨어를 씁니다. 자세히:
+  [펌웨어 가이드](docs/firmware-guide.md)
 
-YD-ESP32-S3 에는 USB-C 포트가 **2개** 있습니다. **양쪽 모두 펌웨어 다운로드와
-시리얼 로그가 둘 다 됩니다.** 차이는 "무엇만 되냐"가 아니라 "얼마나 안정적이냐 +
-특수 기능"입니다. (좌/우는 보드 방향에 따라 뒤집힐 수 있으니, 커넥터 옆
-**실크스크린 라벨 `USB` / `COM`** 을 기준으로 보세요.)
+## 빠른 시작
 
-| 항목 | 왼쪽 (`USB`, 네이티브) | 오른쪽 (`COM`, CH343) |
-|------|------------------------|------------------------|
-| 펌웨어 다운로드 | ✅ 됨 | ✅ 됨 |
-| 시리얼 로그 | ✅ 됨 | ✅ 됨 |
-| 자동 리셋(버튼 없이 플래시) | 됨 | ✅ 가장 안정적 |
-| JTAG 디버깅 | ✅ 이쪽만 가능 | ❌ |
-| 앱이 GPIO19/20 사용 시 | 연결 끊길 수 있음 | 영향 없음 |
-| Linux 인식 | `/dev/ttyACM*` (`303a:1001`) | `/dev/ttyACM*` (`1A86:55D3`) |
+```bash
+# 1) 진단 도구 환경
+python3 -m venv venv && source venv/bin/activate
+pip install -r tools/board_check/requirements.txt
 
-**기억할 것:**
+# 2) 시리얼 포트 권한 (최초 1회)
+sudo usermod -aG dialout "$USER" && newgrp dialout
 
-- 평소엔 **오른쪽(`COM`) 하나만** 쓰면 됩니다. 플래시도 로그도 다 되고 제일 안정적.
-- **왼쪽(`USB`)** 은 JTAG 디버깅이나 USB 디바이스 기능 개발이 필요할 때만.
+# 3) 보드 진단 (연결된 모든 보드)
+python tools/board_check/main.py
+```
 
-## MicroPython 펌웨어 선택 (벤더 제공 bin)
+PSRAM/WiFi/LED/버튼 런타임 검사까지 하려면 ESP-IDF 설치 후 진단 펌웨어를 빌드합니다 —
+[설치 가이드](docs/install.md) 참고.
 
-[`hw/YD-ESP32-S3/1-MPY-firmware/`](hw/YD-ESP32-S3/1-MPY-firmware/) 에 벤더가 제공한
-MicroPython v1.19.1 펌웨어 bin 이 3개 있습니다. 파일명 규칙은 **N = Flash 크기(MB),
-R = PSRAM 크기(MB)** 입니다. **메모리 구성이 맞는 것 하나만** 써야 합니다.
-
-| 파일 | Flash | PSRAM | 이 보드(N16R8)에? |
-|------|-------|-------|--------------------|
-| `YD-ESP32-S3-N16R8-MPY-V1.1.bin` | 16MB | 8MB | ✅ **이것** |
-| `YD-ESP32-S3-N8R2-MPY-V1.1.bin` | 8MB | 2MB | ❌ 다른 구성 |
-| `YD-ESP32-S3-N8R8-MPY-V1.1.bin` | 8MB | 8MB | ❌ 다른 구성 |
-
-본 프로젝트 보드는 **Flash 16MB + PSRAM 8MB(N16R8)** 이므로
-**`YD-ESP32-S3-N16R8-MPY-V1.1.bin`** 를 사용합니다. 다른 bin 을 올리면 Flash 를
-8MB 로만 인식하거나 PSRAM 설정이 맞지 않아(특히 N8R2 는 2MB) 오동작할 수 있습니다.
-
-> 참고: 이 MicroPython bin 은 벤더 제공 원본(백업) 용도입니다. CSI 연구 단계에서는
-> ESP-IDF(C) 기반 펌웨어를 직접 빌드해 사용하게 됩니다.
+```bash
+bash scripts/install_esp_idf.sh       # ESP-IDF 설치(최초 1회)
+```
 
 ## 개발 환경
 
-- Ubuntu Linux
-- Python 3.10+ (**venv**)
-- ESP-IDF 5.x
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
+- Ubuntu Linux / Python 3.10+ (**venv**) / ESP-IDF 5.x
+- Python 환경이 **두 개**(진단 도구용 / 펌웨어 빌드용)입니다 — 헷갈리면
+  [Python 환경 두 개](docs/python-environments.md) 참고.
 
 ## 현재 단계 (Phase 1): 보드 자동 진단 도구
 
 CSI 개발에 들어가기 전, 구매한 ESP32-S3 보드들의 하드웨어 이상 여부를 자동으로
-검사하고 PASS/FAIL 리포트를 생성하는 진단 도구입니다.
-
-```bash
-cd tools/board_check
-pip install -r requirements.txt
-python main.py            # 연결된 모든 보드 검사
-```
-
-자세한 사용법은 [`tools/board_check/README.md`](tools/board_check/README.md) 참고.
+검사하고 PASS/FAIL 리포트를 생성하는 진단 도구입니다. 자세한 사용법은
+[`tools/board_check/README.md`](tools/board_check/README.md) 참고.
 
 ## 저장소 구조
 
@@ -97,9 +85,9 @@ ESP32_WIFI_Loc/
 ├── hw/
 │   └── YD-ESP32-S3/      # 보드 하드웨어 자료(데이터시트/핀맵/벤더 펌웨어)
 ├── tools/
-│   └── board_check/      # Phase 1: 보드 자동 진단 도구
-├── docs/                 # 설치/설계 문서
-├── scripts/              # 보조 스크립트
+│   └── board_check/      # Phase 1: 보드 자동 진단 도구 (+ firmware/ 진단 펌웨어)
+├── docs/                 # 설치/환경/하드웨어 세부 문서
+├── scripts/              # 보조 스크립트 (ESP-IDF 설치 등)
 ├── CLAUDE.md             # Claude Code 작업 가이드라인
 ├── LICENSE               # AGPL v3
 └── README.md
