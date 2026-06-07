@@ -261,7 +261,8 @@ function renderWifiTab() {
         <span class="chevron">▾</span>
       </div>
       <div class="ap-form" hidden>
-        <input type="password" placeholder="비밀번호 (개방형이면 비워두기)" class="pw-input" />
+        <input type="text" placeholder="비밀번호 (개방형이면 비워두기)" class="pw-input" />
+        <button class="btn secondary toggle-pw" type="button" title="비밀번호 표시/숨김">🙈 숨기기</button>
         <button class="btn connect-btn">접속 테스트</button>
         <div class="ap-status muted"></div>
       </div>`;
@@ -271,10 +272,13 @@ function renderWifiTab() {
       document.querySelectorAll(".ap-form").forEach((f) => { if (f !== form) f.hidden = true; });
       form.hidden = !form.hidden;
     };
-    row.querySelector(".connect-btn").onclick = () => {
-      const pw = row.querySelector(".pw-input").value;
-      doWifiConnect(ssid, pw);
+    const pwInput = row.querySelector(".pw-input");
+    row.querySelector(".toggle-pw").onclick = (e) => {
+      const show = pwInput.type === "password";
+      pwInput.type = show ? "text" : "password";
+      e.target.textContent = show ? "🙈 숨기기" : "👁 표시";
     };
+    row.querySelector(".connect-btn").onclick = () => doWifiConnect(ssid, pwInput.value);
     row.dataset.ssid = ssid;
     list.appendChild(row);
   });
