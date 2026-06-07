@@ -100,7 +100,7 @@ bash scripts/install_esp_idf.sh
 
 스크립트가 하는 일:
 
-1. `~/esp/esp-idf` 에 ESP-IDF `v5.3.1` 을 클론 (얕은 클론으로 용량 절약)
+1. `~/esp/esp-idf` 에 ESP-IDF `v5.4` 를 클론 (얕은 클론으로 용량 절약)
 2. `install.sh esp32s3` 로 Xtensa toolchain + ESP-IDF 전용 Python 환경을
    `~/.espressif` 에 설치 (cmake/ninja 도 여기서 받으므로 시스템에 없어도 됨)
 
@@ -124,7 +124,7 @@ ESP-IDF 명령(`idf.py`)을 쓰려면 **새 터미널마다** 환경을 활성�
 ```bash
 source ~/esp/esp-idf/export.sh
 
-idf.py --version          # 설치 확인 (예: ESP-IDF v5.3.1)
+idf.py --version          # 설치 확인 (예: ESP-IDF v5.4)
 ```
 
 > 자주 쓴다면 셸 별칭을 등록해두면 편합니다:

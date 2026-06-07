@@ -5,7 +5,7 @@
 # ESP32-S3 펌웨어 빌드에 필요한 ESP-IDF(C SDK)를 설치한다.
 #
 #   - 클론 위치: ~/esp/esp-idf  (IDF_DIR 환경변수로 변경 가능)
-#   - 버전     : v5.3.1         (IDF_VERSION 환경변수로 변경 가능)
+#   - 버전     : v5.4           (IDF_VERSION 환경변수로 변경 가능)
 #   - 대상 칩  : esp32s3        (IDF_TARGET 환경변수로 변경 가능)
 #
 # 멱등성: 이미 클론돼 있으면 다시 받지 않고, toolchain 설치만 다시 수행한다.
