@@ -74,6 +74,10 @@ bash scripts/step02_run_cli_based_diagnostics.sh
 > WiFi **접속** 테스트는 저장소 루트의 `config.yaml` 에 적은 SSID/비밀번호로 실제
 > AP 에 붙어 봅니다(`config.yaml.example` 복사해 작성). 미설정 시 해당 항목만 SKIP.
 
+> [2단계]는 기본으로 **대화형 BOOT 버튼 검사**를 포함합니다 — 검사 끝에 보드별로
+> "BOOT 버튼을 누르세요" 안내가 나오면 누르면 됩니다. 끄려면 `--no-button-test`:
+> `bash scripts/step02_run_cli_based_diagnostics.sh --no-button-test`
+
 ## 개발 환경
 
 - Ubuntu Linux / Python 3.10+ (**venv**) / ESP-IDF 5.x

@@ -40,13 +40,15 @@ bash scripts/step02_run_cli_based_diagnostics.sh
 | 동작 | 내용 |
 |------|------|
 | 1 | 진단용 Python venv 준비(없으면 생성 + `requirements.txt` 설치) |
-| 2 | `main.py --firmware` 실행 — flash 전체 erase → 펌웨어 다운로드 → **PSRAM/WiFi/RGB LED/BOOT 버튼까지 모두 검사** |
+| 2 | `main.py --firmware` 실행 — flash 전체 erase → 펌웨어 다운로드 → **PSRAM / WiFi 스캔·접속 / Bluetooth LE / RGB LED / BOOT 버튼 / 온도센서 / GPIO 검사** |
+| 3 | (기본 ON) **대화형 BOOT 버튼 검사** — 보드별로 "버튼 누르세요" 안내 후 실제 눌림 감지 |
 
 자주 쓰는 옵션(모두 `main.py` 로 전달됨):
 
 ```bash
 bash scripts/step02_run_cli_based_diagnostics.sh --sudo            # 포트 권한 부족 시
 bash scripts/step02_run_cli_based_diagnostics.sh --port /dev/ttyACM0
+bash scripts/step02_run_cli_based_diagnostics.sh --no-button-test  # 대화형 버튼 검사 끄기
 bash scripts/step02_run_cli_based_diagnostics.sh --stress 100      # 스트레스 테스트
 ```
 

@@ -93,11 +93,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="스트레스 테스트: esptool 연결을 N회 반복하며 통신 오류 집계(기본 0=비활성).",
     )
     parser.add_argument(
-        "--button-test",
-        action="store_true",
-        help="대화형 BOOT 버튼 검사: 보드별로 '버튼 누르세요' 안내 후 실제 눌림 감지"
-        "(--firmware 필요, 순차 진행).",
+        "--no-button-test",
+        dest="button_test",
+        action="store_false",
+        help="대화형 BOOT 버튼 검사를 건너뜁니다(기본은 수행). "
+        "대화형이라 보드별로 '버튼 누르세요' 안내 후 실제 눌림을 감지(--firmware 필요).",
     )
+    parser.set_defaults(button_test=True)
     parser.add_argument(
         "--min-ap",
         type=int,
@@ -304,14 +306,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 보드 번호 순으로 정렬.
     results.sort(key=lambda r: (r.get("board_index") or 0))
 
-    # 대화형 BOOT 버튼 검사(옵션) — 병렬 검사 뒤에 보드별로 순차 진행.
-    if args.button_test:
-        if not args.firmware:
-            print(
-                f"{Fore.YELLOW}⚠ --button-test 는 --firmware 가 필요합니다 — 건너뜀.{Style.RESET_ALL}"
-            )
-        else:
-            run_button_tests(results)
+    # 대화형 BOOT 버튼 검사(기본 ON) — 병렬 검사 뒤에 보드별로 순차 진행.
+    # 펌웨어가 있어야 가능하므로 --firmware 일 때만 수행(아니면 조용히 생략).
+    # 끄려면 --no-button-test.
+    if args.button_test and args.firmware:
+        run_button_tests(results)
 
     print("\n" + "=" * 56)
     log_text = report.print_report(results)
