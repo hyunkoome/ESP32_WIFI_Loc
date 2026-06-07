@@ -48,6 +48,34 @@ header h1 { font-size: 18px; margin: 0; }
 }
 .overall.PASS { background: var(--green); color: #04210f; }
 .overall.FAIL { background: var(--red); color: #fff; }
+.overall.pending { background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+.ident { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+
+/* RGB LED 색 스와치 */
+.cc-swatch {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #444; border: 1px solid var(--border); margin-right: 4px;
+  transition: background 0.3s;
+}
+
+/* WiFi AP 항목(클릭→비번 폼) */
+.ap-item { background: var(--panel2); border-radius: 8px; overflow: hidden; }
+.ap-head { cursor: pointer; user-select: none; background: transparent; }
+.ap-head:hover { background: rgba(255,255,255,0.03); }
+.ap-head .chevron { color: var(--muted); font-size: 12px; }
+.ap-form {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; border-top: 1px dashed var(--border);
+}
+.pw-input {
+  flex: 1; min-width: 180px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 8px 10px; font-size: 13px;
+}
+.connect-btn { white-space: nowrap; }
+.ap-status { width: 100%; font-size: 13px; }
+.ap-status.ok { color: var(--green); }
+.ap-status.fail { color: var(--red); }
 .counts { display: flex; gap: 14px; font-size: 13px; }
 .cnt.pass { color: var(--green); }
 .cnt.fail { color: var(--red); }
@@ -92,7 +120,21 @@ header h1 { font-size: 18px; margin: 0; }
 .badge.ok { color: var(--green); border-color: var(--green); }
 .badge.no { color: var(--red); border-color: var(--red); }
 
-main { max-width: 920px; margin: 0 auto; padding: 24px; }
+/* 탭 */
+.tabs {
+  max-width: 920px; margin: 16px auto 0; padding: 0 24px;
+  display: flex; gap: 8px;
+}
+.tab {
+  background: var(--panel); border: 1px solid var(--border);
+  border-bottom: none; color: var(--muted);
+  padding: 10px 20px; border-radius: 10px 10px 0 0; cursor: pointer; font-size: 14px;
+}
+.tab.active { background: var(--panel2); color: var(--text); font-weight: 600; }
+.tab-page { display: none; }
+.tab-page.active { display: block; }
+
+main { max-width: 920px; margin: 0 auto; padding: 16px 24px 24px; }
 
 .panel {
   background: var(--panel);

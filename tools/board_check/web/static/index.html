@@ -19,74 +19,81 @@
     <div id="fw-status" class="badge">펌웨어 확인 중…</div>
   </header>
 
+  <!-- 탭 -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="main">🩺 진단</button>
+    <button class="tab" data-tab="wifi">📶 WiFi</button>
+    <button class="tab" data-tab="ble">🔵 BLE</button>
+  </nav>
+
   <main>
-    <!-- 보드 선택 -->
-    <section class="panel">
-      <div class="panel-head">
-        <h2>🔌 연결된 보드</h2>
-        <button id="btn-refresh" class="btn secondary">↻ 새로고침</button>
-      </div>
-      <div id="board-list" class="board-list">탐색 중…</div>
-    </section>
-
-    <!-- 진행 상황 (시각화) -->
-    <section class="panel" id="progress-panel" hidden>
-      <div class="progress-head">
-        <span class="spinner" id="spinner"></span>
-        <div class="progress-text">
-          <div id="phase-text">진단 준비 중…</div>
-          <div id="phase-sub" class="muted">보드 flash + 검사로 20~40초 걸립니다</div>
+    <!-- ===== 진단 탭 ===== -->
+    <div class="tab-page active" id="page-main">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>🔌 연결된 보드</h2>
+          <button id="btn-refresh" class="btn secondary">↻ 새로고침</button>
         </div>
-        <div id="elapsed" class="elapsed">0초</div>
-      </div>
-      <div class="progress-bar"><div class="progress-bar-fill" id="bar-fill"></div></div>
-      <div class="steps" id="steps"></div>
-    </section>
+        <div id="board-list" class="board-list">탐색 중…</div>
+      </section>
 
-    <!-- 결과 -->
-    <section class="panel" id="result-panel" hidden>
-      <!-- 요약 바 -->
-      <div class="summary">
-        <div class="summary-left">
-          <span id="overall-badge" class="overall"></span>
-          <div class="counts" id="counts"></div>
+      <section class="panel" id="progress-panel" hidden>
+        <div class="progress-head">
+          <span class="spinner" id="spinner"></span>
+          <div class="progress-text">
+            <div id="phase-text">진단 준비 중…</div>
+            <div id="phase-sub" class="muted">보드 flash + 검사로 20~40초 걸립니다</div>
+          </div>
+          <div id="elapsed" class="elapsed">0초</div>
         </div>
-        <div class="live-controls">
-          <span class="led-label">RGB LED</span>
-          <span id="led-indicator" class="led-dot" title="RGB LED 순환"></span>
-          <button id="btn-live" class="btn secondary" disabled>⏸ 라이브 중지</button>
+        <div class="progress-bar"><div class="progress-bar-fill" id="bar-fill"></div></div>
+        <div class="steps" id="steps"></div>
+      </section>
+
+      <section class="panel" id="result-panel">
+        <div class="summary">
+          <div class="summary-left">
+            <span id="overall-badge" class="overall pending">대기 중</span>
+            <div class="counts" id="counts"></div>
+            <div class="ident" id="board-ident"></div>
+          </div>
+          <div class="live-controls">
+            <span class="led-label">RGB LED</span>
+            <span id="led-indicator" class="led-dot" title="RGB LED 현재 색"></span>
+            <button id="btn-live" class="btn secondary" disabled>▶ 라이브 모니터</button>
+          </div>
         </div>
-      </div>
+        <div id="checks" class="checks-grid"></div>
+      </section>
+    </div>
 
-      <div id="board-info" class="board-info"></div>
+    <!-- ===== WiFi 탭 ===== -->
+    <div class="tab-page" id="page-wifi">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>📶 WiFi 스캔 목록 <span class="count-pill" id="wifi-count"></span></h2>
+          <span class="muted" id="wifi-hint">AP 를 클릭하면 비밀번호를 입력해 접속을 테스트할 수 있습니다</span>
+        </div>
+        <div id="wifi-list" class="scan-list">
+          <div class="empty">먼저 [진단] 탭에서 진단을 실행하세요.</div>
+        </div>
+      </section>
+    </div>
 
-      <!-- BOOT 버튼 가이드 -->
-      <div id="btn-guide" class="btn-guide" hidden>
-        <div class="big" id="btn-guide-title">🔘 BOOT 버튼을 눌러보세요</div>
-        <div class="countdown" id="btn-guide-sub">보드의 BOOT 버튼을 누르면 여기 표시됩니다</div>
-      </div>
-
-      <!-- 검사 항목 (아이콘 카드 그리드) -->
-      <div id="checks" class="checks-grid"></div>
-
-      <!-- WiFi AP 목록 -->
-      <div class="sublist-box" id="wifi-box" hidden>
-        <h3>📶 WiFi 스캔 목록 <span class="count-pill" id="wifi-count"></span></h3>
-        <div id="wifi-list" class="scan-list"></div>
-      </div>
-
-      <!-- BLE 기기 목록 -->
-      <div class="sublist-box" id="ble-box" hidden>
-        <h3>🔵 Bluetooth LE 기기 <span class="count-pill" id="ble-count"></span></h3>
-        <div id="ble-list" class="scan-list"></div>
-      </div>
-    </section>
+    <!-- ===== BLE 탭 ===== -->
+    <div class="tab-page" id="page-ble">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>🔵 Bluetooth LE 기기 <span class="count-pill" id="ble-count"></span></h2>
+        </div>
+        <div id="ble-list" class="scan-list">
+          <div class="empty">먼저 [진단] 탭에서 진단을 실행하세요.</div>
+        </div>
+      </section>
+    </div>
   </main>
 
-  <footer>
-    <span>ESP32_WIFI_Loc · 보드 자동 진단 (웹 대시보드)</span>
-  </footer>
-
+  <footer><span>ESP32_WIFI_Loc · 보드 자동 진단 (웹 대시보드)</span></footer>
   <script src="/static/app.js"></script>
 </body>
 </html>

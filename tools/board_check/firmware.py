@@ -241,11 +241,16 @@ def stream_cycles(
     should_stop: Callable[[], bool],
     on_cycle: Callable[[Dict[str, object]], None],
     baud: int = config.FIRMWARE_MONITOR_BAUD,
+    pop_command: Optional[Callable[[], Optional[bytes]]] = None,
 ) -> Optional[str]:
     """
     이미 진단 펌웨어가 도는 보드에서 시리얼을 한 번 열고, 반복 출력되는
     DIAG_START..DIAG_DONE 사이클을 계속 읽어 완전한 사이클마다 on_cycle(dict)를
     호출한다(웹 라이브 모니터용).
+
+    pop_command(): 펌웨어로 보낼 명령 바이트를 반환(없으면 None). 매 반복마다
+    호출해 대기 중인 명령(예: b"WIFI_CONNECT ssid\\tpw\\n")을 시리얼로 써보낸다.
+    같은 연결로 읽기/쓰기를 함께 처리해 웹의 AP 접속 명령을 지원한다.
 
     should_stop() 가 True 가 되면 종료한다. 시리얼을 한 번만 열어 보드 리셋을
     최소화한다. 반환: 오류 메시지(있으면) 또는 None.
@@ -271,6 +276,14 @@ def stream_cycles(
         cur: Dict[str, object] = {}
         saw_start = False
         while not should_stop():
+            # 대기 중인 명령이 있으면 펌웨어로 써보낸다(WiFi 접속 등).
+            if pop_command is not None:
+                cmd = pop_command()
+                if cmd:
+                    try:
+                        ser.write(cmd)
+                    except Exception:
+                        pass
             line = ser.readline().decode("utf-8", errors="replace").strip()
             if not line:
                 continue

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import queue
 import sys
 import threading
 from pathlib import Path
@@ -108,6 +109,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     loop = asyncio.get_running_loop()
     out_q: asyncio.Queue = asyncio.Queue()
     live_stop = threading.Event()
+    live_cmd_q: "queue.Queue" = queue.Queue()  # 라이브 스트림으로 보낼 명령(WiFi 접속 등)
 
     def push(obj: Dict[str, object]) -> None:
         """스레드에서 안전하게 송신 큐에 적재."""
@@ -136,7 +138,12 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             except Exception as exc:  # 진단 실패가 서버를 죽이지 않도록.
                 push({"type": "error", "msg": f"진단 예외: {exc}"})
 
-    def run_live(port: str, stop_ev: threading.Event) -> None:
+    def run_live(port: str, stop_ev: threading.Event, cmd_q: "queue.Queue") -> None:
+        def pop_command():
+            try:
+                return cmd_q.get_nowait()
+            except queue.Empty:
+                return None
         # 진단이 끝나 포트가 비면 락을 잡고 시리얼을 한 번 열어 사이클을 읽는다.
         with _port_lock(port):
             if stop_ev.is_set():
@@ -146,6 +153,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 port,
                 should_stop=stop_ev.is_set,
                 on_cycle=lambda cyc: push({"type": "live", "data": _json_safe(cyc)}),
+                pop_command=pop_command,
             )
         push({"type": "live_stopped", "error": err})
 
@@ -167,12 +175,20 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             elif action == "start_live":
                 live_stop.set()  # 이전 라이브 정지
                 live_stop = threading.Event()
+                live_cmd_q = queue.Queue()
                 port = str(msg.get("port"))
                 threading.Thread(
-                    target=run_live, args=(port, live_stop), daemon=True
+                    target=run_live, args=(port, live_stop, live_cmd_q), daemon=True
                 ).start()
             elif action == "stop_live":
                 live_stop.set()
+            elif action == "wifi_connect":
+                # 웹 WiFi 탭: AP 클릭 → 비번 입력 → 접속. 라이브 스트림으로 명령 전달.
+                ssid = str(msg.get("ssid", ""))
+                pw = str(msg.get("password", ""))
+                cmd = f"WIFI_CONNECT {ssid}\t{pw}\n".encode("utf-8")
+                live_cmd_q.put(cmd)
+                push({"type": "wifi_connecting", "ssid": ssid})
     except WebSocketDisconnect:
         pass
     finally:

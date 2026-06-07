@@ -33,6 +33,18 @@
 
 #include "driver/gpio.h"
 #include "driver/temperature_sensor.h"
+#include "driver/uart.h"
+/* UART 입력(런타임 명령)을 위해 콘솔 stdio 를 UART 드라이버로 라우팅한다.
+ * IDF 버전에 따라 헤더/함수명이 다르므로 분기. */
+#if __has_include("driver/uart_vfs.h")
+#include "driver/uart_vfs.h"
+#define DIAG_UART_USE_DRIVER() uart_vfs_dev_use_driver(UART_NUM_0)
+#elif __has_include("esp_vfs_dev.h")
+#include "esp_vfs_dev.h"
+#define DIAG_UART_USE_DRIVER() esp_vfs_dev_uart_use_driver(UART_NUM_0)
+#else
+#define DIAG_UART_USE_DRIVER()
+#endif
 #include "esp_chip_info.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
@@ -138,6 +150,7 @@ static void report_psram(char *out, size_t n)
 /* RGB LED(WS2812) 핸들. 초기 점등 검사 후에도 해제하지 않고 유지해, app_main
  * 루프에서 계속 순환 점등(R->G->B->R...)하는 데 재사용한다. 초기화 실패 시 NULL. */
 static led_strip_handle_t g_led_strip = NULL;
+static int s_led_ok = 0;  /* LED 초기화 성공 여부(반복 루프의 라이브 색 출력에 사용) */
 
 static void report_led(char *out, size_t n)
 {
@@ -174,8 +187,10 @@ static void report_led(char *out, size_t n)
         g_led_strip = NULL;
     }
 
-    /* DIAG_LED {"ok":true,"gpio":48} */
-    snprintf(out, n, "DIAG_LED {\"ok\":%s,\"gpio\":%d}", ok ? "true" : "false", RGB_LED_GPIO);
+    s_led_ok = ok;
+    /* DIAG_LED {"ok":true,"gpio":48,"color":"R"} (color 는 반복 루프에서 갱신) */
+    snprintf(out, n, "DIAG_LED {\"ok\":%s,\"gpio\":%d,\"color\":\"-\"}",
+             ok ? "true" : "false", RGB_LED_GPIO);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -349,17 +364,10 @@ static void wifi_conn_event_handler(void *arg, esp_event_base_t base,
     }
 }
 
-static void report_wifi_connect(char *out, size_t n)
+/* 핵심 접속 루틴: 주어진 ssid/pw 로 접속 시도하고 결과를 out 에 기록한다.
+ * 부팅 시(빌드 자격증명)와 런타임 명령(웹에서 AP 클릭) 양쪽에서 재사용한다. */
+static void do_wifi_connect(const char *ssid, const char *pw, char *out, size_t n)
 {
-    const char *ssid = DIAG_WIFI_SSID;
-    const char *pw = DIAG_WIFI_PASSWORD;
-
-    /* 자격증명 미설정 — 접속 테스트 생략(호스트가 SKIP 처리). */
-    if (ssid[0] == '\0') {
-        snprintf(out, n, "DIAG_WIFI_CONNECT {\"attempted\":false}");
-        return;
-    }
-
     s_wifi_conn_eg = xEventGroupCreate();
     s_wifi_retry = 0;
     s_wifi_ip[0] = '\0';
@@ -373,6 +381,7 @@ static void report_wifi_connect(char *out, size_t n)
     wifi_config_t wc = { 0 };
     strncpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid) - 1);
     strncpy((char *)wc.sta.password, pw, sizeof(wc.sta.password) - 1);
+    esp_wifi_disconnect();  /* 이전 연결이 있으면 정리(런타임 재시도 대비) */
     esp_wifi_set_config(WIFI_IF_STA, &wc);
     esp_wifi_connect();
 
@@ -402,6 +411,21 @@ static void report_wifi_connect(char *out, size_t n)
     esp_wifi_disconnect();
     vEventGroupDelete(s_wifi_conn_eg);
 }
+
+/* 부팅 시 호출: 빌드 주입 자격증명(config.yaml)으로 접속 테스트. */
+static void report_wifi_connect(char *out, size_t n)
+{
+    if (DIAG_WIFI_SSID[0] == '\0') {
+        /* 자격증명 미설정 — 생략(호스트가 SKIP). 웹에서 AP 클릭 시 런타임 명령으로 시도. */
+        snprintf(out, n, "DIAG_WIFI_CONNECT {\"attempted\":false}");
+        return;
+    }
+    do_wifi_connect(DIAG_WIFI_SSID, DIAG_WIFI_PASSWORD, out, n);
+}
+
+/* 런타임 WiFi 접속 결과를 보관하는 전역 버퍼(반복 출력에 쓰임).
+ * 부팅 시 report_wifi_connect 가, 이후 웹 명령(serial_cmd_task)이 갱신한다. */
+static char g_wifi_conn_line[200] = "DIAG_WIFI_CONNECT {\"attempted\":false}";
 
 /* ----------------------------------------------------------------------- */
 /* BLE 스캔 (NimBLE)                                                       */
@@ -629,6 +653,63 @@ static void report_gpio(char *out, size_t n)
 }
 
 /* ----------------------------------------------------------------------- */
+/* 런타임 시리얼 명령 수신                                                  */
+/*  - 호스트(웹)가 UART0 로 "WIFI_CONNECT <ssid>\t<pw>" 한 줄을 보내면 해당 */
+/*    AP 로 접속을 시도하고 결과를 g_wifi_conn_line 에 갱신한다(반복 출력에  */
+/*    반영). 웹 WiFi 탭에서 AP 클릭→비번 입력→접속 확인에 사용.            */
+/* ----------------------------------------------------------------------- */
+static void handle_command(const char *line)
+{
+    const char *prefix = "WIFI_CONNECT ";
+    size_t plen = strlen(prefix);
+    if (strncmp(line, prefix, plen) != 0) {
+        return;
+    }
+    const char *rest = line + plen;
+    char ssid[64] = {0};
+    char pw[64] = {0};
+    const char *tab = strchr(rest, '\t');  /* "ssid\tpassword" */
+    if (tab) {
+        size_t sl = (size_t)(tab - rest);
+        if (sl > sizeof(ssid) - 1) sl = sizeof(ssid) - 1;
+        memcpy(ssid, rest, sl);
+        strncpy(pw, tab + 1, sizeof(pw) - 1);
+    } else {
+        strncpy(ssid, rest, sizeof(ssid) - 1);  /* 개방형 AP(비번 없음) */
+    }
+    if (ssid[0] == '\0') {
+        return;
+    }
+    char tmp[200];
+    do_wifi_connect(ssid, pw, tmp, sizeof(tmp));
+    /* 한 번에 교체(반복 출력 루프가 중간 상태를 읽지 않도록). */
+    strncpy(g_wifi_conn_line, tmp, sizeof(g_wifi_conn_line) - 1);
+    g_wifi_conn_line[sizeof(g_wifi_conn_line) - 1] = '\0';
+}
+
+static void serial_cmd_task(void *arg)
+{
+    char line[160];
+    int li = 0;
+    uint8_t ch;
+    while (1) {
+        int nr = uart_read_bytes(UART_NUM_0, &ch, 1, pdMS_TO_TICKS(50));
+        if (nr != 1) {
+            continue;
+        }
+        if (ch == '\n' || ch == '\r') {
+            line[li] = '\0';
+            if (li > 0) {
+                handle_command(line);
+            }
+            li = 0;
+        } else if (li < (int)sizeof(line) - 1) {
+            line[li++] = (char)ch;
+        }
+    }
+}
+
+/* ----------------------------------------------------------------------- */
 /* 진입점                                                                  */
 /* ----------------------------------------------------------------------- */
 void app_main(void)
@@ -652,7 +733,6 @@ void app_main(void)
     static char led_line[160];
     static char button_line[160];
     static char wifi_line[2048];  /* AP 목록(ssid/rssi/ch)까지 담으므로 크게 */
-    static char wifi_conn_line[200];
     static char ble_line[2048];   /* 기기 목록(addr/rssi/name)까지 담으므로 크게 */
     static char temp_line[160];
     static char gpio_line[200];
@@ -662,10 +742,16 @@ void app_main(void)
     report_led(led_line, sizeof(led_line));
     report_button(button_line, sizeof(button_line));
     report_wifi(wifi_line, sizeof(wifi_line));
-    report_wifi_connect(wifi_conn_line, sizeof(wifi_conn_line));
+    report_wifi_connect(g_wifi_conn_line, sizeof(g_wifi_conn_line));
     report_ble(ble_line, sizeof(ble_line));
     report_temp(temp_line, sizeof(temp_line));
     report_gpio(gpio_line, sizeof(gpio_line));
+
+    /* UART0 드라이버 설치 + 콘솔 stdio 라우팅 후, 런타임 명령 수신 태스크 시작.
+     * (웹 WiFi 탭의 AP 클릭→비번→접속 명령을 UART 로 받기 위함) */
+    uart_driver_install(UART_NUM_0, 1024, 0, 0, NULL, 0);
+    DIAG_UART_USE_DRIVER();
+    xTaskCreate(serial_cmd_task, "serial_cmd", 4096, NULL, 5, NULL);
 
     /* --- 보관한 결과를 약 2초마다 반복 출력한다. ---
      * flash 직후 호스트가 언제 시리얼을 열든 완전한 한 사이클
@@ -685,7 +771,7 @@ void app_main(void)
         printf("%s\n", led_line);
         printf("%s\n", button_line);
         printf("%s\n", wifi_line);
-        printf("%s\n", wifi_conn_line);
+        printf("%s\n", g_wifi_conn_line);
         printf("%s\n", ble_line);
         printf("%s\n", temp_line);
         printf("%s\n", gpio_line);
@@ -701,6 +787,13 @@ void app_main(void)
                                 cycle_colors[color_idx][1],
                                 cycle_colors[color_idx][2]);
             led_strip_refresh(g_led_strip);
+        }
+        /* 현재 표시 중인 색을 DIAG_LED 에 실어 보냄(웹 RGB LED 카드 라이브 색). */
+        {
+            const char *cn = (color_idx == 0) ? "R" : (color_idx == 1) ? "G" : "B";
+            snprintf(led_line, sizeof(led_line),
+                     "DIAG_LED {\"ok\":%s,\"gpio\":%d,\"color\":\"%s\"}",
+                     s_led_ok ? "true" : "false", RGB_LED_GPIO, cn);
             color_idx = (color_idx + 1) % 3;
         }
 
