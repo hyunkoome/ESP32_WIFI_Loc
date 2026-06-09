@@ -21,7 +21,8 @@ env/             # 환경변수 파일 디렉터리(설정값)는 커밋 금지
 #   - tools/board_check/cli_wifi_config.yaml : CLI 진단 전용 WiFi 자격증명(런타임 주입)
 #   - csi/config_devices.yaml(.example)      : CSI tx/rx 디바이스 인벤토리(자격증명 아님)
 # 사용자 요청으로 cli_wifi_config.yaml 도 commit 에 포함한다(자격증명 포함 주의).
-# (WiFi 자격증명은 더 이상 빌드 시 헤더로 주입하지 않으므로 wifi_credentials.h 항목 제거)
+# (WiFi 자격증명은 빌드에 박지 않고 호스트가 런타임 'WIFI_CONNECT' 시리얼 명령으로
+#  주입한다 — board_check 와 동일. 따라서 wifi_credentials.h 빌드 헤더는 쓰지 않는다.)
 
 # ===== 진단 도구 산출물 =====
 tools/board_check/results/

@@ -32,6 +32,8 @@ IDF_DIR="${IDF_DIR:-$HOME/esp/esp-idf}"
 FLASH_BAUD="${FLASH_BAUD:-460800}"
 
 # role → 펌웨어 디렉터리명
+#   tx=ESP-NOW 송신, rx=통합 수신(ESP-NOW tx + 라우터). 라우터 자격증명은 빌드에 박지
+#   않고 호스트가 런타임에 'WIFI_CONNECT' 시리얼 명령으로 주입한다(board_check 패턴).
 declare -A ROLE_FW=( [tx]="csi_send" [rx]="csi_recv" )
 
 # --- 인자 파싱 ---------------------------------------------------------------
