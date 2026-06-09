@@ -1,0 +1,11 @@
+# 모션 인지(정적/동적 분류) 설정 — CSI GUI 가 런타임에 로드한다.
+# 하이퍼파라미터는 사람이 조정, classifiers 는 GUI 의 'Train Classifier' 가 자동 갱신한다.
+motion_detection:
+  # --- 공통 하이퍼파라미터 ---
+  move_window: 20     # 변동지표 계산 윈도우(최근 N 프레임, ~2초 @10Hz). 짧을수록 빠르고 노이즈↑
+  ema_alpha: 0.3      # 변동지표 EMA 계수(0~1). 작을수록 부드럽고 느림, 클수록 민감하고 빠름
+  outlier_n: 5        # 연속 N회 같은 결과여야 상태 확정(순간 튐 완화)
+  hysteresis: 0.15    # 히스테리시스 마진 = (동적평균-정적평균) × 이 비율. 경계 진동 방지
+
+  # --- rx 별 학습 결과 (Train 시 자동 갱신, serial 키) ---
+  classifiers: {}

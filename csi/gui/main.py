@@ -12,7 +12,7 @@ UI 구성:
 """
 from __future__ import annotations
 
-import json
+import csv
 import queue
 import sys
 import threading
@@ -47,6 +47,42 @@ def read_wifi_config() -> tuple[str, str]:
         return str(w.get("ssid") or ""), str(w.get("password") or "")
     except Exception:
         return "", ""
+
+
+_MOTION_YAML = Path(__file__).resolve().parents[2] / "config" / "motion_detection.yaml"
+
+
+def load_motion_config() -> dict:
+    """config/motion_detection.yaml 로드 — 하이퍼파라미터 + rx 별 classifiers."""
+    defaults = {"move_window": 20, "ema_alpha": 0.3, "outlier_n": 5,
+                "hysteresis": 0.15, "classifiers": {}}
+    try:
+        import yaml
+        cfg = (yaml.safe_load(_MOTION_YAML.read_text()) or {}).get("motion_detection") or {}
+        for k in defaults:
+            if k in cfg and cfg[k] is not None:
+                defaults[k] = cfg[k]
+    except Exception:
+        pass
+    return defaults
+
+
+def save_motion_classifier(serial: str, params: dict) -> None:
+    """학습 결과를 motion_detection.yaml 의 classifiers[serial] 에 저장(나머지 값 보존)."""
+    import yaml
+    try:
+        full = yaml.safe_load(_MOTION_YAML.read_text()) or {}
+    except Exception:
+        full = {}
+    md = full.setdefault("motion_detection", {})
+    clf = md.get("classifiers")
+    if not isinstance(clf, dict):
+        clf = {}
+        md["classifiers"] = clf
+    clf[serial] = params
+    _MOTION_YAML.parent.mkdir(exist_ok=True)
+    _MOTION_YAML.write_text(
+        yaml.safe_dump(full, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
 class Bridge(QtCore.QObject):
@@ -180,11 +216,25 @@ class RxTab(QtWidgets.QWidget):
         self._static_buf: list[float] = []     # 정적 상태 로깅 데이터(변동지표)
         self._motion_buf: list[float] = []     # 동적 상태 로깅 데이터
         self._logging: str | None = None       # "static" | "motion" | None (로깅 중)
-        self._move = 0.0                       # 최근 움직임지표(변동)
+        self._log_start = 0.0                  # 로깅 시작 시각(경과초 표시용)
+        self._csv_f = None                     # raw 로깅 CSV 파일 핸들
+        self._csv_w = None
+        self._csv_path: Path | None = None
+        self._move = 0.0                       # EMA 스무딩된 움직임지표(변동)
         self._state = "static"                 # 확정 상태: static | move
         self._pending_state = "static"
         self._pending_count = 0
-        self._outlier_n = 3                    # 연속 N회 같아야 확정(outlier 필터)
+        # 모션 인지 하이퍼파라미터 + 학습결과를 config/motion_detection.yaml 에서 로드(런타임).
+        mc = load_motion_config()
+        self._move_win = int(mc["move_window"])
+        self._ema = float(mc["ema_alpha"])
+        self._outlier_n = int(mc["outlier_n"])
+        self._hyst = float(mc["hysteresis"])
+        clf = (mc.get("classifiers") or {}).get(serial)
+        if isinstance(clf, dict) and clf.get("thresh") is not None:
+            self._static_ref = clf.get("static_ref")
+            self._motion_ref = clf.get("motion_ref")
+            self._thresh = clf.get("thresh")
         self._send_q: "queue.Queue[str]" = queue.Queue()
         self._stop = threading.Event()
         self._build()
@@ -298,56 +348,79 @@ class RxTab(QtWidgets.QWidget):
 
     # ---- 정적/동적 로깅 + 학습(분류기) — 상단 공용 패널이 모든 rx 에 동시 호출 ----
     def start_logging(self, mode: str) -> None:
-        """정적/동적 상태 데이터(변동지표) 로깅 시작(stop_logging 까지 계속 수집)."""
+        """정적/동적 상태 데이터 로깅 시작(stop_logging 까지). raw 데이터를 CSV 로도 저장."""
         self._logging = mode
         if mode == "static":
             self._static_buf = []
         else:
             self._motion_buf = []
+        out = Path(__file__).resolve().parents[2] / "results"
+        out.mkdir(exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        self._csv_path = out / f"log_{mode}_{self.serial}_{ts}.csv"
+        self._csv_f = open(self._csv_path, "w", newline="", encoding="utf-8")
+        self._csv_w = csv.writer(self._csv_f)
+        self._csv_w.writerow(["t_sec", "move", "rssi", "n_sub", "amplitude..."])
+        self._log_start = time.monotonic()
         self.lbl_state.setText(f"Logging ({'static' if mode == 'static' else 'motion'})…")
         self.lbl_state.setStyleSheet("color:#f5a623;")
 
     def stop_logging(self) -> int:
-        """로깅 종료(저장). 수집한 보드 수(1) 반환."""
+        """로깅 종료(버퍼 확정 + CSV 닫기). 수집한 보드 수(1) 반환."""
         if self._logging is None:
             return 0
         buf = self._static_buf if self._logging == "static" else self._motion_buf
         done = self._logging
+        elapsed = time.monotonic() - self._log_start
         self._logging = None
-        self.lbl_state.setText(f"{'Static' if done == 'static' else 'Motion'} logging done ({len(buf)} samples)")
+        if self._csv_f is not None:
+            self._csv_f.close()
+            self.bridge.log.emit(f"[{self.serial[-4:]}] raw saved → results/{self._csv_path.name}")
+            self._csv_f = None
+            self._csv_w = None
+        self.lbl_state.setText(
+            f"{'Static' if done == 'static' else 'Motion'} done ({elapsed:.1f}s, {len(buf)} samples)")
         self.lbl_state.setStyleSheet("color:#888;")
         return 1
 
     def train(self) -> bool:
-        """로깅한 정적/동적 데이터로 임계를 학습(분류기 생성) + 파라미터 저장."""
+        """로깅한 정적/동적 데이터로 임계를 학습 + config/motion_detection.yaml 갱신."""
         if not self._static_buf or not self._motion_buf:
             self.bridge.log.emit(f"[{self.serial[-4:]}] Cannot train: need both static and motion logging")
             return False
         self._static_ref = sum(self._static_buf) / len(self._static_buf)
         self._motion_ref = sum(self._motion_buf) / len(self._motion_buf)
         self._thresh = (self._static_ref + self._motion_ref) / 2.0
-        out = Path(__file__).resolve().parents[2] / "results"
-        out.mkdir(exist_ok=True)
-        (out / f"classifier_{self.serial}.json").write_text(json.dumps({
-            "serial": self.serial, "source": self._want_source,
-            "static_ref": self._static_ref, "motion_ref": self._motion_ref,
-            "thresh": self._thresh, "outlier_n": self._outlier_n,
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        save_motion_classifier(self.serial, {
+            "source": self._want_source,
+            "static_ref": round(self._static_ref, 4),
+            "motion_ref": round(self._motion_ref, 4),
+            "thresh": round(self._thresh, 4),
+        })
         self.bridge.log.emit(
             f"[{self.serial[-4:]}] Trained: static={self._static_ref:.2f} "
-            f"motion={self._motion_ref:.2f} thresh={self._thresh:.2f}")
+            f"motion={self._motion_ref:.2f} thresh={self._thresh:.2f} → motion_detection.yaml")
         return True
 
     def _update_classifier(self, move: float) -> None:
-        # 로깅 중이면 해당 버퍼에 변동지표를 수집(분류 안 함).
+        # 로깅 중이면 버퍼에 변동지표를 수집(분류 안 함) + 경과시간/샘플수 표시.
         if self._logging:
             buf = self._static_buf if self._logging == "static" else self._motion_buf
             buf.append(move)
+            elapsed = time.monotonic() - self._log_start
+            kind = "static" if self._logging == "static" else "motion"
+            self.lbl_state.setText(f"Logging {kind} ({elapsed:.1f}s, {len(buf)} samples)")
             return
         if self._thresh is None:
             return
-        # outlier 필터: 연속 N회 같은 결과여야 상태를 확정(순간 노이즈로 안 튀게).
-        raw = "move" if move > self._thresh else "static"
+        # 히스테리시스(yaml hysteresis): 정적→동적은 높은 임계, 동적→정적은 낮은 임계로
+        # 경계에서 0/1 진동(튐)을 막는다. 마진 = (동적평균-정적평균) × hysteresis.
+        rng = (self._motion_ref or 0.0) - (self._static_ref or 0.0)
+        margin = self._hyst * rng
+        if self._state == "static":
+            raw = "move" if move > self._thresh + margin else "static"
+        else:
+            raw = "static" if move < self._thresh - margin else "move"
         if raw == self._pending_state:
             self._pending_count += 1
         else:
@@ -410,11 +483,18 @@ class RxTab(QtWidgets.QWidget):
         # 2~2.5 로 또렷이 오른다 — 느린 움직임/노이즈에 약한 도플러보다 직관적인 지표.
         # 움직임지표는 워터폴 전체(12초)가 아니라 최근 짧은 구간(MOVE_WIN)으로 — 전체면
         # 움직임이 윈도우에 반영될 때까지 판단이 느리다(체감 3초+ 지연의 원인).
-        move = float(self._wf[-MOVE_WIN:].std(axis=0).mean())
-        self._move = move
+        move_raw = float(self._wf[-self._move_win:].std(axis=0).mean())
+        # EMA 스무딩(yaml ema_alpha): 짧은 윈도우의 순간 노이즈로 상태가 튀지 않게.
+        self._move = (1.0 - self._ema) * self._move + self._ema * move_raw
+        move = self._move
         self.lbl_stats.setText(
             f"[{src}]  rate {p['rate']}  RSSI {p['rssi']}  sub {p['n_sub']}"
             f"   |   Motion index (variation) {move:.2f}")
+        # 로깅 중이면 raw 데이터(타임스탬프+진폭)를 CSV 에 기록(로직 개선용).
+        if self._logging and self._csv_w is not None:
+            t = time.monotonic() - self._log_start
+            self._csv_w.writerow([f"{t:.3f}", f"{move:.4f}", p["rssi"], len(amp)]
+                                 + [f"{a:.1f}" for a in amp])
         self._update_classifier(move)
 
 
