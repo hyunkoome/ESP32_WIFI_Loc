@@ -74,18 +74,28 @@ def analyze(name, status, data):
     m = (freqs > 0.3) & (freqs <= 8)
     peak = float(spec[m].max()) if m.any() else 0.0
     fpk = float(freqs[m][spec[m].argmax()]) if m.any() else 0.0
+    # reference 차용 메트릭: jitter(motion)=프레임 간 빠른 변화, wander(presence)=느린 변동.
+    jitter = float(np.abs(np.diff(amps, axis=0)).mean())
+    wander = float(amps.std(axis=0).mean())
     print(f"  [{name}] pkt={len(rows)} rate={rate:.0f}Hz rssi={rssi:.0f} sub={amps.shape[1]} "
-          f"진폭={amps.mean():.1f} 변동std={amps.std(axis=0).mean():.2f} "
-          f"도플러피크={peak:.1f}@{fpk:.1f}Hz")
+          f"| wander(presence)={wander:.2f}  jitter(motion)={jitter:.3f}  "
+          f"도플러={peak:.1f}@{fpk:.1f}Hz")
 
 
 if __name__ == "__main__":
     import yaml
     DUR = float(sys.argv[1]) if len(sys.argv) > 1 else 12
     LABEL = sys.argv[2] if len(sys.argv) > 2 else "측정"
+    DELAY = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0   # 측정 전 대기(방 나갈 시간)
     cfg = yaml.safe_load(open("config/wifi_config.yaml")) or {}
     w = cfg.get("wifi") or {}
     wifi = (str(w.get("ssid") or ""), str(w.get("password") or ""))
+    if DELAY > 0:
+        print(f"{DELAY:.0f}초 후 측정 시작 — 그동안 방을 나가세요!", flush=True)
+        for s in range(int(DELAY), 0, -1):
+            print(f"  {s}…", flush=True)
+            time.sleep(1)
+        print("측정 시작!", flush=True)
     out = {}
     ts = [threading.Thread(target=stream, args=(n, p, s, DUR, out),
                            kwargs={"wifi": wifi} if s == "router" else {})
