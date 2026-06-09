@@ -69,6 +69,7 @@ class RxTab(QtWidgets.QWidget):
         self._want_source = "tx"
         self._wf: np.ndarray | None = None
         self._dop_smooth: np.ndarray | None = None
+        self._dop_ymax = 60.0  # 도플러 세로 상한(피크를 천천히 따라가 출렁임 최소)
         self._send_q: "queue.Queue[str]" = queue.Queue()
         self._stop = threading.Event()
         self._build()
@@ -208,6 +209,10 @@ class RxTab(QtWidgets.QWidget):
         ys[1::2] = self._dop_smooth
         self.dop_curve.setData(xs, ys, connect="pairs")
         self.dop_pts.setData(f, self._dop_smooth)
+        # 세로 상한: 피크에 여유(×1.3)를 두되 천천히(×0.97) 줄여 출렁임 없이 안 잘리게.
+        peak = float(self._dop_smooth.max()) * 1.3
+        self._dop_ymax = max(peak, self._dop_ymax * 0.97, 30.0)
+        self.dop_plot.setYRange(0, self._dop_ymax, padding=0)
 
 
 class MainWindow(QtWidgets.QMainWindow):
