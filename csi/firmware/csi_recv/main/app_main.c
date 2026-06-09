@@ -109,9 +109,6 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
     }
     ets_printf("]\"\n");
 
-    if (s_count % 50 == 0) {
-        ets_printf("DEVICE_ROLE {\"role\":\"rx\",\"fw\":\"csi_recv\",\"ver\":1}\n");
-    }
     s_count++;
 }
 
@@ -309,6 +306,13 @@ void app_main(void)
     uart_driver_install(UART_NUM_0, 1024, 0, 0, NULL, 0);
     xTaskCreate(serial_cmd_task, "serial_cmd", 4096, NULL, 5, NULL);
 
-    ets_printf("DEVICE_ROLE {\"role\":\"rx\",\"fw\":\"csi_recv\",\"ver\":1}\n");
     ESP_LOGI(TAG, "CSI 수신 시작 — tx(ESP-NOW) 즉시, 라우터는 WIFI_CONNECT 명령 대기");
+
+    /* DEVICE_ROLE 을 신호와 무관하게 주기 출력한다. CSI 콜백 안에서만 출력하면 tx/라우터
+     * 신호가 없을 때(tx 미연결 등) CSI 가 안 와서 role 이 영영 감지되지 않는다(rx 인데
+     * RX 로 안 잡히는 문제의 원인). 1.5초마다 한 줄 보내 호스트가 항상 감지하게 한다. */
+    while (1) {
+        ets_printf("DEVICE_ROLE {\"role\":\"rx\",\"fw\":\"csi_recv\",\"ver\":1}\n");
+        vTaskDelay(pdMS_TO_TICKS(1500));
+    }
 }
