@@ -221,6 +221,8 @@ class RxTab(QtWidgets.QWidget):
         self._csv_w = None
         self._csv_path: Path | None = None
         self._move = 0.0                       # EMA 스무딩된 움직임지표(변동)
+        self._wander = 0.0                     # presence 메트릭(느린 변동, 호흡/미세)
+        self._jitter = 0.0                     # motion 메트릭(빠른 변화, 움직임)
         self._state = "static"                 # 확정 상태: static | move
         self._pending_state = "static"
         self._pending_count = 0
@@ -360,7 +362,7 @@ class RxTab(QtWidgets.QWidget):
         self._csv_path = out / f"log_{mode}_{self.serial}_{ts}.csv"
         self._csv_f = open(self._csv_path, "w", newline="", encoding="utf-8")
         self._csv_w = csv.writer(self._csv_f)
-        self._csv_w.writerow(["t_sec", "move", "rssi", "n_sub", "amplitude..."])
+        self._csv_w.writerow(["t_sec", "wander", "jitter", "rssi", "n_sub", "amplitude..."])
         self._log_start = time.monotonic()
         self.lbl_state.setText(f"Logging ({'static' if mode == 'static' else 'motion'})…")
         self.lbl_state.setStyleSheet("color:#f5a623;")
@@ -483,18 +485,25 @@ class RxTab(QtWidgets.QWidget):
         # 2~2.5 로 또렷이 오른다 — 느린 움직임/노이즈에 약한 도플러보다 직관적인 지표.
         # 움직임지표는 워터폴 전체(12초)가 아니라 최근 짧은 구간(MOVE_WIN)으로 — 전체면
         # 움직임이 윈도우에 반영될 때까지 판단이 느리다(체감 3초+ 지연의 원인).
-        move_raw = float(self._wf[-self._move_win:].std(axis=0).mean())
+        recent = self._wf[-self._move_win:]
+        move_raw = float(recent.std(axis=0).mean())
         # EMA 스무딩(yaml ema_alpha): 짧은 윈도우의 순간 노이즈로 상태가 튀지 않게.
         self._move = (1.0 - self._ema) * self._move + self._ema * move_raw
         move = self._move
+        # reference(room_presence_detection) 차용: presence/motion 분리용 두 메트릭.
+        # jitter(motion): 프레임 간 빠른 변화. wander(presence): 느린 변동(긴 윈도우 std).
+        jitter_raw = float(np.abs(np.diff(recent, axis=0)).mean()) if recent.shape[0] > 1 else 0.0
+        wander_raw = float(self._wf.std(axis=0).mean())
+        self._jitter = (1.0 - self._ema) * self._jitter + self._ema * jitter_raw
+        self._wander = (1.0 - self._ema) * self._wander + self._ema * wander_raw
         self.lbl_stats.setText(
-            f"[{src}]  rate {p['rate']}  RSSI {p['rssi']}  sub {p['n_sub']}"
-            f"   |   Motion index (variation) {move:.2f}")
-        # 로깅 중이면 raw 데이터(타임스탬프+진폭)를 CSV 에 기록(로직 개선용).
+            f"[{src}] rate {p['rate']} RSSI {p['rssi']}  |  "
+            f"wander(presence) {self._wander:.2f}   jitter(motion) {self._jitter:.2f}")
+        # 로깅 중이면 raw 데이터(타임스탬프+wander+jitter+진폭)를 CSV 에 기록.
         if self._logging and self._csv_w is not None:
             t = time.monotonic() - self._log_start
-            self._csv_w.writerow([f"{t:.3f}", f"{move:.4f}", p["rssi"], len(amp)]
-                                 + [f"{a:.1f}" for a in amp])
+            self._csv_w.writerow([f"{t:.3f}", f"{self._wander:.4f}", f"{self._jitter:.4f}",
+                                  p["rssi"], len(amp)] + [f"{a:.1f}" for a in amp])
         self._update_classifier(move)
 
 
