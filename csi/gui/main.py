@@ -800,8 +800,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_mode()
 
     def _refresh_mode(self) -> None:
-        trained = any(t._thresh is not None for t in self._rx_tabs.values())
-        if trained:
+        # yaml 디폴트 임계가 있어 rx 가 감지되면 항상 실시간 감지 중(학습은 보정).
+        if self._rx_tabs:
             self.lbl_mode.setText("🟢 Detecting (live)")
             self.lbl_mode.setStyleSheet("color:#2ecc71;")
         else:
