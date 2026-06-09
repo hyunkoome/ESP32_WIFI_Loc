@@ -2,4 +2,5 @@
 # 보드 감지/flash 는 tools/board_check/requirements.txt(esptool, pyserial)도 필요.
 PyQt5>=5.15
 pyqtgraph>=0.13
+numpy>=1.21
 pyserial>=3.5
