@@ -464,8 +464,7 @@ class RxTab(QtWidgets.QWidget):
             if not buf:
                 return None
             ws = [w for w, _ in buf]; js = [j for _, j in buf]
-            return {"n": len(buf),
-                    "wander_mean": sum(ws) / len(ws), "wander_max": max(ws),
+            return {"wander_mean": sum(ws) / len(ws), "wander_max": max(ws),
                     "jitter_mean": sum(js) / len(js), "jitter_max": max(js)}
         save_motion_classifier(self.serial, {
             "source": self._want_source,
@@ -545,7 +544,7 @@ class RxTab(QtWidgets.QWidget):
         spec = np.abs(np.fft.rfft(wf * win, axis=0)).mean(axis=1)
         fs = float(p.get("rate") or 0.0) or 50.0
         freqs = np.fft.rfftfreq(self._wf.shape[0], 1.0 / fs)
-        mask = freqs <= 10.0
+        mask = (freqs >= 0.3) & (freqs <= 10.0)   # DC 근처 저주파(AGC/드리프트) 제외
         sp = spec[mask]
         if self._dop_smooth is None or self._dop_smooth.shape != sp.shape:
             self._dop_smooth = sp
