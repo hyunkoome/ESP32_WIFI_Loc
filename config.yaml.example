@@ -1,8 +1,0 @@
-# config.yaml 템플릿 — 이 파일을 config.yaml 로 복사한 뒤 실제 값으로 채우세요.
-#   cp config.yaml.example config.yaml
-# config.yaml 은 .gitignore 처리되어 commit 되지 않습니다(이 예시 파일만 커밋).
-
-# WiFi 연결 테스트에 사용할 AP (2.4GHz 대역 — ESP32-S3 는 5GHz 미지원).
-wifi:
-  ssid: "your_ap_ssid_here"
-  password: "your_ap_password_here"

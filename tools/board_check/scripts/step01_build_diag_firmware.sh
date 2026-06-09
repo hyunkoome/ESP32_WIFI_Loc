@@ -6,7 +6,7 @@
 # 가능한 병합 바이너리(build/diag_merged.bin)를 생성한다.
 #
 # 이 단계는 보통 "한 번만" 실행하면 된다(펌웨어 소스를 고치면 다시 실행).
-# 실제 보드 검사는 [2단계] scripts/step02_run_cli_based_diagnostics.sh 로 한다.
+# 실제 보드 검사는 [2단계] tools/board_check/scripts/step02_run_cli_based_diagnostics.sh 로 한다.
 #
 #   0) ESP-IDF 설치 확인 — 없으면 scripts/install_esp_idf.sh 로 자동 설치
 #   1) (필요 시) 활성 venv 해제 — ESP-IDF 환경과 충돌 방지
@@ -18,7 +18,7 @@
 #         (= config.FIRMWARE_BIN, main.py --firmware 가 이 파일을 flash)
 #
 # 사용:
-#   bash scripts/step01_build_diag_firmware.sh
+#   bash tools/board_check/scripts/step01_build_diag_firmware.sh
 #
 # 환경변수:
 #   IDF_DIR  ESP-IDF 설치 경로(기본 ~/esp/esp-idf)
@@ -26,8 +26,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-FW_DIR="${REPO_DIR}/tools/board_check/firmware"
+# 이 스크립트는 tools/board_check/scripts/ 에 있다.
+#   SCRIPT_DIR/..        == tools/board_check  (BC_DIR)
+#   SCRIPT_DIR/../../..  == 저장소 루트        (REPO_DIR)
+BC_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+FW_DIR="${BC_DIR}/firmware"
 IDF_DIR="${IDF_DIR:-$HOME/esp/esp-idf}"
 # 절대경로로 지정한다. idf.py merge-bin 은 build/ 디렉터리 안에서 esptool 을
 # 실행하므로, 상대경로(build/...)를 주면 build/build/... 가 되어 실패한다.
@@ -50,7 +54,7 @@ fi
 # --- 0) ESP-IDF 설치 확인 (없으면 자동 설치) ---------------------------------
 if [ ! -f "${IDF_DIR}/export.sh" ]; then
     echo "[0/3] ESP-IDF 미설치 — 설치를 시작합니다(수 분 소요): ${IDF_DIR}"
-    bash "${SCRIPT_DIR}/install_esp_idf.sh"
+    bash "${REPO_DIR}/scripts/install_esp_idf.sh"
 fi
 
 # --- 2) ESP-IDF 환경 활성화 --------------------------------------------------
@@ -58,12 +62,9 @@ echo "[1/3] ESP-IDF 환경 활성화: ${IDF_DIR}"
 # shellcheck disable=SC1091
 source "${IDF_DIR}/export.sh" >/dev/null
 
-# --- 2.5) WiFi 접속 테스트용 자격증명 헤더 생성 ------------------------------
-# config.yaml 의 wifi.ssid/password 를 읽어 main/wifi_credentials.h 로 주입한다.
-# (없으면 빈 값 → 펌웨어가 WiFi 접속 테스트를 SKIP)
-echo "[2.5/3] WiFi 자격증명 헤더 생성 (config.yaml → main/wifi_credentials.h)"
-python3 "${SCRIPT_DIR}/gen_wifi_creds.py" \
-    "${REPO_DIR}/config.yaml" "${FW_DIR}/main/wifi_credentials.h"
+# 참고: WiFi 접속 테스트 자격증명은 더 이상 빌드 시 펌웨어에 주입하지 않는다.
+# 진단 실행 시점에 호스트(main.py / 웹)가 cli_wifi_config.yaml 을 읽어 시리얼 'WIFI_CONNECT'
+# 명령으로 런타임 주입한다. 따라서 cli_wifi_config.yaml 만 바꿔도 재빌드가 필요 없다.
 
 # --- 3) 빌드 ------------------------------------------------------------------
 cd "${FW_DIR}"
@@ -74,6 +75,19 @@ cd "${FW_DIR}"
 #   - managed_components/: idf_component.yml + dependencies.lock 으로 다시 다운로드됨
 echo "[2/3] 완전 클린 빌드 (build/ 삭제 후 처음부터, 수 분 소요)"
 rm -rf "${FW_DIR}/build" "${FW_DIR}/managed_components"
+# 삭제가 실제로 됐는지 검증한다. 권한 문제(예: 예전에 sudo 로 빌드해 build/ 안에
+# root 소유 파일이 남은 경우)로 일부가 안 지워지면 클린 빌드가 깨져 캐시 오염이
+# 그대로 남으므로, 넘어가지 말고 여기서 분명히 멈춘다.
+for _d in build managed_components; do
+    if [ -e "${FW_DIR}/${_d}" ]; then
+        echo "[에러] '${FW_DIR}/${_d}' 삭제 실패 — 폴더가 아직 남아 있습니다." >&2
+        echo "       소유권/권한을 확인하세요(예전 sudo 빌드 잔재일 수 있음):" >&2
+        echo "         ls -ld '${FW_DIR}/${_d}'" >&2
+        echo "         sudo rm -rf '${FW_DIR}/${_d}'   # 필요 시" >&2
+        exit 1
+    fi
+done
+echo "      ✓ build/ · managed_components/ 삭제 확인 — 처음부터 새로 빌드합니다."
 idf.py set-target esp32s3
 idf.py build
 

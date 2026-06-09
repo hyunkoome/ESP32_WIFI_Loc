@@ -17,7 +17,7 @@ Pose 연구에 들어가기 전, 구매한 보드의 정상 동작을 검증하�
 | RGB LED | 진단 펌웨어 WS2812 점등 | 펌웨어 없으면 SKIP |
 | BOOT Button | 진단 펌웨어 GPIO0 입력 | 대화형(`--no-button-test` 로 끔) |
 | WiFi Scan | 진단 펌웨어 AP 스캔 | 펌웨어 없으면 SKIP |
-| WiFi Connect | 진단 펌웨어 실제 AP 접속 | `config.yaml` 자격증명 필요(미설정 SKIP) |
+| WiFi Connect | 진단 펌웨어 실제 AP 접속 | `cli_wifi_config.yaml` 자격증명 필요(미설정 SKIP) |
 | Bluetooth LE | 진단 펌웨어 BLE 스캔 | 펌웨어 없으면 SKIP |
 | Temperature | 진단 펌웨어 내장 온도센서 | 펌웨어 없으면 SKIP |
 | GPIO | 진단 펌웨어 자유 GPIO 풀업/풀다운 | 펌웨어 없으면 SKIP |
@@ -32,8 +32,10 @@ Pose 연구에 들어가기 전, 구매한 보드의 정상 동작을 검증하�
 ## 설치
 
 ```bash
+git clone git@github.com:hyunkoome/ESP32_WIFI_Loc.git
+cd ESP32_WIFI_Loc
 # 프로젝트 venv 활성화
-source /home/hyunkoo/DATA/hdd8TB2/ESP32_WIFI_Loc/venv/bin/activate
+source venv/bin/activate
 
 # 의존성 설치
 cd tools/board_check
@@ -85,7 +87,7 @@ python main.py --stress 100
 python main.py -v
 ```
 
-> 위 단계별 스크립트(`scripts/step01~03`)로도 동일한 검사를 실행할 수 있습니다 —
+> 위 단계별 스크립트(`tools/board_check/scripts/step01~03`)로도 동일한 검사를 실행할 수 있습니다 —
 > 빌드/실행/환경 준비가 자동화돼 있어 더 편합니다. 자세히는
 > [`firmware/README.md`](firmware/README.md) 참고.
 
@@ -147,10 +149,10 @@ BOOT 버튼을 라이브로 갱신합니다. WiFi 접속·BLE 스캔도 대화�
 있습니다.
 
 ```bash
-# (펌웨어 빌드는 최초 1회) bash scripts/step01_build_diag_firmware.sh
-bash scripts/step03_run_web_based_diagnostics.sh
+# (펌웨어 빌드는 최초 1회) bash tools/board_check/scripts/step01_build_diag_firmware.sh
+bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
 # → 브라우저에서 http://127.0.0.1:8000 열기 (종료: Ctrl+C)
-# 다른 PC 에서 접속: HOST=0.0.0.0 PORT=9000 bash scripts/step03_run_web_based_diagnostics.sh
+# 다른 PC 에서 접속: HOST=0.0.0.0 PORT=9000 bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
 ```
 
 진단/WiFi/BLE 탭 화면 예시는 [`firmware/README.md`](firmware/README.md#진단-결과-화면-웹-대시보드) 참고.

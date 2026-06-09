@@ -94,17 +94,20 @@ def read_diagnostics(
     port: str,
     baud: int = config.FIRMWARE_MONITOR_BAUD,
     timeout: float = config.FIRMWARE_MONITOR_TIMEOUT,
+    wifi_inject: Optional[tuple] = None,
 ) -> Dict[str, object]:
     """
     펌웨어가 출력하는 DIAG_* 라인을 시리얼에서 읽어 파싱.
 
+    wifi_inject=(ssid, password) 를 주면(CLI 경로), 첫 완전 사이클을 받은 뒤 '같은
+    시리얼 연결'로 'WIFI_CONNECT ssid\\tpw' 명령을 보내고 DIAG_WIFI_CONNECT 의
+    attempted=true 결과가 올 때까지 더 읽는다. 포트를 닫았다 다시 열지 않으므로
+    보드 리셋/명령 유실 없이 런타임 접속 테스트가 안정적으로 동작한다(끊었다 다시
+    열면 보드가 리셋돼 serial_cmd_task 가 명령을 못 받는 문제가 있었다).
+
     반환: {
-      "psram": {...}|None,
-      "wifi": {...}|None,
-      "chip": {...}|None,
-      "done": bool,
-      "error": str|None,
-      "raw": str,
+      "psram": {...}|None, "wifi": {...}|None, "wifi_connect": {...}|None,
+      "chip": {...}|None, "done": bool, "error": str|None, "raw": str, ...
     }
     """
     result: Dict[str, object] = {
@@ -124,6 +127,15 @@ def read_diagnostics(
     if serial is None:
         result["error"] = "pyserial 미설치"
         return result
+
+    # WiFi 런타임 주입 명령(있으면). 첫 완전 사이클 뒤부터 ~2초마다 재전송한다.
+    wifi_cmd = None
+    if wifi_inject and wifi_inject[0]:
+        _ssid, _pw = wifi_inject[0], (wifi_inject[1] or "")
+        wifi_cmd = f"WIFI_CONNECT {_ssid}\t{_pw}\n".encode("utf-8")
+    wifi_phase = False   # 첫 사이클이 끝나 WIFI_CONNECT 명령을 보내는 단계인지
+    wifi_done = False    # attempted=true 결과를 받았는지
+    next_wifi_send = 0.0
 
     buffer = []
     ser = None
@@ -151,6 +163,15 @@ def read_diagnostics(
         ser = serial.Serial(port, baudrate=baud, timeout=1.0)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            # WiFi 명령 단계: 명령이 유실될 수 있어 ~2초마다 재전송한다.
+            if wifi_phase and not wifi_done:
+                now = time.monotonic()
+                if now >= next_wifi_send:
+                    try:
+                        ser.write(wifi_cmd)
+                    except Exception:
+                        pass
+                    next_wifi_send = now + 2.0
             line = ser.readline().decode("utf-8", errors="replace").strip()
             if not line:
                 continue
@@ -168,10 +189,19 @@ def read_diagnostics(
                     result[field] = json.loads(payload)
                 except Exception:
                     result[field] = {"parse_error": payload}
+                # WiFi 주입 단계에서 attempted=true 가 오면 접속 테스트 완료.
+                if tag == "DIAG_WIFI_CONNECT" and wifi_phase:
+                    v = result[field]
+                    if isinstance(v, dict) and v.get("attempted"):
+                        wifi_done = True
             # DIAG_START 를 본 뒤의 DONE 만 완전한 사이클로 인정.
             if tag == "DIAG_DONE" and saw_start:
                 result["done"] = True
-                break
+                if wifi_cmd is None:
+                    break          # 일반 진단: 한 사이클이면 충분
+                if wifi_done:
+                    break          # WiFi 주입까지 끝남
+                wifi_phase = True  # 첫 사이클 완료 → WIFI_CONNECT 명령 단계 진입
         if not result["done"] and not any(
             result[k] for k in data_fields
         ):
@@ -192,9 +222,16 @@ def read_diagnostics(
     return result
 
 
-def run_firmware_diagnostics(port: str, use_sudo: bool = False) -> Dict[str, object]:
+def run_firmware_diagnostics(
+    port: str, use_sudo: bool = False, wifi_from_config: bool = True
+) -> Dict[str, object]:
     """
     펌웨어 flash -> 부팅 대기 -> DIAG 출력 읽기를 한 번에 수행.
+
+    WiFi '접속' 테스트는 펌웨어에 자격증명을 박지 않는다. wifi_from_config 가 True
+    (CLI)면 cli_wifi_config.yaml 에 자격증명이 있을 때 read_diagnostics 가 '같은
+    시리얼 연결'로 런타임 주입해 결과를 채운다. False(웹)면 yaml 을 쓰지 않고, 사용자가
+    WiFi 탭에서 입력한 값으로 별도 접속 명령을 보낸다(여기서는 SKIP 상태로 둠).
 
     반환: read_diagnostics() 결과에 flash 정보를 합친 딕셔너리.
     """
@@ -217,7 +254,12 @@ def run_firmware_diagnostics(port: str, use_sudo: bool = False) -> Dict[str, obj
         }
     # flash 직후 보드가 재부팅되며 진단을 출력하기까지 잠시 대기.
     time.sleep(1.5)
-    diag = read_diagnostics(port)
+    # CLI(wifi_from_config=True)만 cli_wifi_config.yaml 자격증명을 '같은 시리얼 연결'로
+    # 런타임 주입한다(read_diagnostics 가 한 사이클을 읽은 뒤 WIFI_CONNECT 를 보내고
+    # attempted=true 결과를 받음 — 포트를 끊었다 다시 열지 않아 명령이 안전히 닿는다).
+    # 웹은 False 라 yaml 을 쓰지 않고, 사용자가 WiFi 탭 입력으로 별도 명령을 보낸다.
+    wifi_inject = config.wifi_credentials() if wifi_from_config else None
+    diag = read_diagnostics(port, wifi_inject=wifi_inject)
     diag["flashed"] = True
     return diag
 

@@ -10,11 +10,11 @@
 #
 # 사전 준비:
 #   1) 보드의 오른쪽 USB-C 포트(COM/CH343)에 케이블 연결.
-#   2) bash scripts/step01_build_diag_firmware.sh   # 펌웨어 빌드(최초 1회)
+#   2) bash tools/board_check/scripts/step01_build_diag_firmware.sh   # 펌웨어 빌드(최초 1회)
 #
 # 사용:
-#   bash scripts/step03_run_web_based_diagnostics.sh
-#   HOST=0.0.0.0 PORT=9000 bash scripts/step03_run_web_based_diagnostics.sh
+#   bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
+#   HOST=0.0.0.0 PORT=9000 bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
 #
 # 환경변수:
 #   HOST  바인드 주소(기본 127.0.0.1). 다른 PC 에서 접속하려면 0.0.0.0.
@@ -23,7 +23,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# tools/board_check/scripts/ → SCRIPT_DIR/../../.. == 저장소 루트
+REPO_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 VENV_DIR="${REPO_DIR}/venv"
 BC_DIR="${REPO_DIR}/tools/board_check"
 HOST="${HOST:-127.0.0.1}"
@@ -49,7 +50,7 @@ MERGED_BIN="${BC_DIR}/firmware/build/diag_merged.bin"
 if [ ! -f "${MERGED_BIN}" ]; then
     echo "[2/3] ⚠ 진단 펌웨어가 없습니다(${MERGED_BIN})."
     echo "      PSRAM/WiFi/BLE/온도/GPIO 런타임 검사를 하려면 먼저:"
-    echo "        bash scripts/step01_build_diag_firmware.sh"
+    echo "        bash tools/board_check/scripts/step01_build_diag_firmware.sh"
 else
     echo "[2/3] 진단 펌웨어 확인됨"
 fi

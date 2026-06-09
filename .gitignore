@@ -17,10 +17,11 @@ env/             # 환경변수 파일 디렉터리(설정값)는 커밋 금지
 .env
 *.env
 !*.env.example       # 예시 파일은 허용
-# WiFi 자격증명이 주입된 빌드용 헤더(step01 이 config.yaml 에서 생성) — 비밀 포함
-tools/board_check/firmware/main/wifi_credentials.h
-# config.yaml 은 사용자 요청으로 commit 포함 (자격증명 포함 주의)
-config.yaml.example  # 예시 파일
+# 설정 파일 정책(모두 commit 포함):
+#   - tools/board_check/cli_wifi_config.yaml : CLI 진단 전용 WiFi 자격증명(런타임 주입)
+#   - csi/config_devices.yaml(.example)      : CSI tx/rx 디바이스 인벤토리(자격증명 아님)
+# 사용자 요청으로 cli_wifi_config.yaml 도 commit 에 포함한다(자격증명 포함 주의).
+# (WiFi 자격증명은 더 이상 빌드 시 헤더로 주입하지 않으므로 wifi_credentials.h 항목 제거)
 
 # ===== 진단 도구 산출물 =====
 tools/board_check/results/

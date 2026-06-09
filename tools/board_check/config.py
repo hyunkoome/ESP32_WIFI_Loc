@@ -10,7 +10,6 @@ ESP32-S3 보드 진단 도구의 전역 상수 및 설정 모음.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -151,13 +150,14 @@ def ensure_results_dir() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# 사용자 설정 파일 (config.yaml)
+# 사용자 설정 파일 (cli_wifi_config.yaml)
 # ---------------------------------------------------------------------------
-# 저장소 루트의 config.yaml 에서 WiFi 자격증명 등 환경 의존 값을 읽는다.
-# config.yaml 은 자격증명을 포함하므로 gitignore 처리되며, config.yaml.example
-# 을 복사해 만든다. PyYAML 미설치/파일 부재 시에는 빈 설정으로 폴백한다.
-PROJECT_ROOT = BASE_DIR.parent.parent
-USER_CONFIG_YAML = PROJECT_ROOT / "config.yaml"
+# board_check 전용 cli_wifi_config.yaml 에서 WiFi 자격증명 등 환경 의존 값을 읽는다.
+# (이 파일은 board_check 디렉터리 안에 둔다 — 진단 도구 전용 설정이므로.)
+# cli_wifi_config.yaml 은 자격증명을 포함하지만 사용자 요청으로 commit 에 포함한다.
+# 값은 실행 시 런타임에 읽혀 시리얼로 펌웨어에 주입된다(빌드 시 주입 아님).
+# PyYAML 미설치/파일 부재 시 빈 설정으로 폴백.
+USER_CONFIG_YAML = BASE_DIR / "cli_wifi_config.yaml"
 
 try:
     import yaml  # PyYAML
@@ -166,7 +166,7 @@ except Exception:  # pragma: no cover
 
 
 def load_user_config() -> dict:
-    """config.yaml 을 읽어 딕셔너리로 반환. 없거나 PyYAML 미설치면 빈 dict."""
+    """cli_wifi_config.yaml 을 읽어 딕셔너리로 반환. 없거나 PyYAML 미설치면 빈 dict."""
     if yaml is None or not USER_CONFIG_YAML.exists():
         return {}
     try:
@@ -178,7 +178,7 @@ def load_user_config() -> dict:
 
 
 def wifi_credentials() -> tuple[str | None, str | None]:
-    """config.yaml 의 wifi.ssid / wifi.password 를 (ssid, password) 로 반환."""
+    """cli_wifi_config.yaml 의 wifi.ssid / wifi.password 를 (ssid, password) 로 반환."""
     cfg = load_user_config()
     wifi = cfg.get("wifi") or {}
     if not isinstance(wifi, dict):

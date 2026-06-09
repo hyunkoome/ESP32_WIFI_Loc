@@ -157,9 +157,9 @@ python tools/board_check/main.py --firmware
 또는 위 [1~5단계]를 자동화한 스크립트로 실행할 수도 있습니다(CLI / 웹 대시보드):
 
 ```bash
-bash scripts/step01_build_diag_firmware.sh        # 펌웨어 빌드(최초 1회)
-bash scripts/step02_run_cli_based_diagnostics.sh  # CLI 진단
-bash scripts/step03_run_web_based_diagnostics.sh  # 웹 대시보드(선택) → http://127.0.0.1:8000
+bash tools/board_check/scripts/step01_build_diag_firmware.sh        # 펌웨어 빌드(최초 1회)
+bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh  # CLI 진단
+bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh  # 웹 대시보드(선택) → http://127.0.0.1:8000
 ```
 
 > 웹 대시보드는 추가 의존성이 필요합니다:
@@ -185,7 +185,7 @@ source ~/esp/esp-idf/export.sh      # 펌웨어 빌드용(필요 시)
 # (실행)
 python tools/board_check/main.py              # 기본 검사
 python tools/board_check/main.py --firmware   # PSRAM/WiFi/BLE/온도/GPIO/LED/버튼 포함 검사
-bash scripts/step03_run_web_based_diagnostics.sh   # 웹 대시보드(선택)
+bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh   # 웹 대시보드(선택)
 ```
 
 ---

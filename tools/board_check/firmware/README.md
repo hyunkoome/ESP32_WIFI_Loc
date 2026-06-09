@@ -41,10 +41,10 @@ USB·UART·부트로더·Flash·PSRAM·RGB LED·BOOT 버튼·WiFi·BLE·온도·
 
 ```bash
 # [1단계] 펌웨어 빌드 (최초 1회 — ESP-IDF 없으면 자동 설치)
-bash scripts/step01_build_diag_firmware.sh
+bash tools/board_check/scripts/step01_build_diag_firmware.sh
 
 # [2단계] 보드 진단 실행 (반복 실행 가능)
-bash scripts/step02_run_cli_based_diagnostics.sh
+bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh
 ```
 
 > 오른쪽 COM 포트가 플래시·로그에 가장 안정적입니다. 좌/우 구분은
@@ -73,10 +73,10 @@ bash scripts/step02_run_cli_based_diagnostics.sh
 자주 쓰는 옵션(모두 `main.py` 로 전달됨):
 
 ```bash
-bash scripts/step02_run_cli_based_diagnostics.sh --sudo            # 포트 권한 부족 시
-bash scripts/step02_run_cli_based_diagnostics.sh --port /dev/ttyACM0
-bash scripts/step02_run_cli_based_diagnostics.sh --no-button-test  # 대화형 버튼 검사 끄기
-bash scripts/step02_run_cli_based_diagnostics.sh --stress 100      # 스트레스 테스트
+bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh --sudo            # 포트 권한 부족 시
+bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh --port /dev/ttyACM0
+bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh --no-button-test  # 대화형 버튼 검사 끄기
+bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh --stress 100      # 스트레스 테스트
 ```
 
 > ⚠️ [2단계]는 보드의 flash 를 **전체 erase** 한 뒤 진단 펌웨어로 덮어씁니다.
@@ -93,14 +93,14 @@ CLI 대신 브라우저에서 진단하고 싶으면 [3단계] 스크립트로 �
 
 ```bash
 # [1단계] 펌웨어 빌드는 동일하게 먼저 1회 (없으면 런타임 검사만 SKIP)
-bash scripts/step01_build_diag_firmware.sh
+bash tools/board_check/scripts/step01_build_diag_firmware.sh
 
 # [3단계] 웹 대시보드 기동
-bash scripts/step03_run_web_based_diagnostics.sh
+bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
 # → 브라우저에서 http://127.0.0.1:8000 열기 (종료: Ctrl+C)
 
 # 다른 PC 에서 접속하려면 바인드 주소/포트 지정:
-HOST=0.0.0.0 PORT=9000 bash scripts/step03_run_web_based_diagnostics.sh
+HOST=0.0.0.0 PORT=9000 bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
 ```
 
 > 웹 의존성은 `tools/board_check/requirements-web.txt`(FastAPI/uvicorn)에 있고,
@@ -178,8 +178,50 @@ DIAG_GPIO         {"ok":true,"tested":20,"passed":20,"failed":[]}
 DIAG_DONE
 ```
 
-> WiFi 접속(`DIAG_WIFI_CONNECT`)은 `config.yaml` 의 wifi.ssid/password 를 빌드 시
-> 주입해 실제 AP 에 붙어 본다(미설정 시 `attempted:false` → 호스트가 SKIP).
+> WiFi 접속(`DIAG_WIFI_CONNECT`)은 부팅 시 자동으로 하지 않는다. 호스트(웹/CLI)가
+> 실행 시점에 `cli_wifi_config.yaml` 의 wifi.ssid/password 를 읽어 시리얼 `WIFI_CONNECT` 명령
+> 으로 주입하면 그 결과가 여기 실린다(미설정/미주입이면 `attempted:false` → SKIP).
+
+---
+
+## WiFi 접속 테스트 & 시리얼 명령 처리 (구현 주의)
+
+이 영역은 **타이밍 함정**이 많다(디버깅에 오래 걸린 부분). 코드를 고치기 전 아래를 숙지할 것.
+
+### 명령/결과 규약
+- 호스트 → 펌웨어: `WIFI_CONNECT <ssid>\t<password>\n` (UART0). 개방형 AP 는 password 생략.
+- 펌웨어 → 호스트: 매 사이클 `DIAG_WIFI_CONNECT {...}`. `attempted:false` = 미주입/처리 전,
+  `attempted:true,connected:true|false` = 결과. 실패 시 끊김 `reason` 을 동봉한다.
+
+### ⚠️ 핵심: 직전 결과 오인 방지
+`do_wifi_connect()` 는 **수 초 블로킹**이고, 그동안 메인 루프는 직전 결과(`g_wifi_conn_line`)를
+~2초마다 계속 출력한다. 그대로면 호스트가 명령 직후 받은 결과를 **직전 시도의 것으로 오인**한다
+("틀린 비번인데 성공", "맞는 비번인데 실패", "2번째는 정상"). 그래서:
+- **펌웨어**: `handle_command` 가 명령 받자마자 결과를 `{"attempted":false}` 로 **무효화**하고,
+  `do_wifi_connect` 완료 후 진짜 결과로 한 번에 교체한다.
+- **호스트**: 무효화(`attempted:false`)를 **한 번 본 뒤의** `attempted:true` 만 진짜 결과로
+  인정한다(`web/app.py` 의 `live_wifi["armed"]`, `web/static/app.js` 의 `pendingArmed`).
+
+### 재전송 & 연쇄 방지
+- 명령을 1회만 보내면 UART 타이밍으로 첫 전송이 유실돼 결과가 안 온다("두 번 눌러야 됨").
+  → 응답이 올 때까지 ~2초마다 재전송한다(호스트, 횟수 제한 있음).
+- 블로킹 중 쌓인 재전송이 같은 접속을 **연쇄 실행**하지 않도록, `serial_cmd_task` 가 처리 후
+  `uart_flush_input(UART_NUM_0)` 로 입력 버퍼를 비운다.
+
+### 끊김 reason
+- 비번 오류는 칩/AP 에 따라 코드가 제각각이고 `reason 15`(4WAY_HANDSHAKE_TIMEOUT)는 진짜
+  비번 오류와 일시적 실패가 섞여 나온다. → `hard_fail`(202 AUTH_FAIL / 201 NO_AP_FOUND /
+  2 AUTH_EXPIRE)만 즉시 실패, 그 외는 retry 1회로 일시적 실패를 흡수한다(틀린 비번은 ~9초
+  걸리지만 정확). 속도를 원하면 retry 를 0 으로 줄일 수 있으나 일시적 실패를 오판할 수 있다.
+
+### 디버깅 (추측 금지)
+직접 보드에 붙는 게 답이다: `esptool ... write_flash 0x0 build/diag_merged.bin` 로 flash,
+`pyserial`(`ser.dtr=False; ser.rts=False` 로 리셋 방지 — 단 USB-Serial-JTAG 는 그래도 리셋될
+수 있음)로 `WIFI_CONNECT` 를 **맞는/틀린 비번 연속**으로 보내며 `DIAG_*` + `ESP_LOGW` 로그를
+캡처한다. 임시 `ESP_LOGW(TAG, "DBG ...")` 로 호출별 상태를 확인 후 제거한다.
+- 펌웨어 수정 → **재빌드 + 재flash** 해야 반영(`step01` 빌드 → 웹 "진단 시작" 또는 step02 flash).
+- `web/app.py` 등 Python 수정 → **uvicorn 재시작**(Ctrl+C 후 step03) 해야 반영(자동 리로드 아님).
+- 포트 점유 확인: `fuser /dev/ttyACM0`.
 
 ---
 

@@ -318,7 +318,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 결과 저장.
     if not args.no_save:
         paths = report.save_results(results, timestamp, log_text=log_text)
-        print(f"결과 저장:")
+        print("결과 저장:")
         print(f"  JSON : {paths['json']}")
         print(f"  LOG  : {paths['log']}")
 

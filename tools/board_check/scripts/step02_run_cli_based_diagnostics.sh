@@ -15,12 +15,12 @@
 #
 # 사전 준비:
 #   1) 보드의 오른쪽 USB-C 포트(COM/CH343, 1A86:55D3)에 케이블 연결(권장).
-#   2) bash scripts/step01_build_diag_firmware.sh  # 펌웨어 빌드(최초 1회)
+#   2) bash tools/board_check/scripts/step01_build_diag_firmware.sh  # 펌웨어 빌드(최초 1회)
 #
 # 사용:
-#   bash scripts/step02_run_cli_based_diagnostics.sh                  # 자동 탐색 후 검사
-#   bash scripts/step02_run_cli_based_diagnostics.sh --port /dev/ttyACM0
-#   bash scripts/step02_run_cli_based_diagnostics.sh --sudo           # 포트 권한 부족 시
+#   bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh                  # 자동 탐색 후 검사
+#   bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh --port /dev/ttyACM0
+#   bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh --sudo           # 포트 권한 부족 시
 #
 # 모든 옵션은 그대로 main.py 로 전달된다(--port, --sudo, --stress, --min-ap,
 # --jobs, --verbose 등).
@@ -28,7 +28,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# tools/board_check/scripts/ → SCRIPT_DIR/../../.. == 저장소 루트
+REPO_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 FW_DIR="${REPO_DIR}/tools/board_check/firmware"
 VENV_DIR="${REPO_DIR}/venv"
 REQ_FILE="${REPO_DIR}/tools/board_check/requirements.txt"
@@ -44,7 +45,7 @@ echo "=================================================================="
 if [ ! -f "${MERGED_BIN}" ]; then
     echo "[에러] 진단 펌웨어가 없습니다: ${MERGED_BIN}"
     echo "       먼저 [1단계]를 실행해 펌웨어를 빌드하세요:"
-    echo "         bash scripts/step01_build_diag_firmware.sh"
+    echo "         bash tools/board_check/scripts/step01_build_diag_firmware.sh"
     exit 1
 fi
 

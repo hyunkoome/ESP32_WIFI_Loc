@@ -89,7 +89,7 @@ python tools/board_check/main.py --firmware   # PSRAM/WiFi/BLE/온도/GPIO/LED/�
 CLI 대신 **웹 대시보드**로 진단하려면(진단/WiFi/BLE 탭, 라이브 LED 색):
 
 ```bash
-bash scripts/step03_run_web_based_diagnostics.sh   # → http://127.0.0.1:8000
+bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh   # → http://127.0.0.1:8000
 ```
 
 > ESP-IDF 환경과 프로젝트 venv 가 헷갈린다면 [Python 환경 두 개](python-environments.md)

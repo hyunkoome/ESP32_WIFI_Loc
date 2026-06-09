@@ -69,18 +69,11 @@
 #include "host/util/util.h"
 #endif
 
-/* WiFi 접속 테스트용 자격증명. step01_build_diag_firmware.sh 가 config.yaml 에서
- * 읽어 wifi_credentials.h 로 생성한다(빌드 시 주입, gitignore 처리). 헤더가 없거나
- * 값이 비어 있으면 접속 테스트는 생략(SKIP)된다. */
-#if __has_include("wifi_credentials.h")
-#include "wifi_credentials.h"
-#endif
-#ifndef DIAG_WIFI_SSID
-#define DIAG_WIFI_SSID ""
-#endif
-#ifndef DIAG_WIFI_PASSWORD
-#define DIAG_WIFI_PASSWORD ""
-#endif
+/* WiFi '접속' 테스트 자격증명은 펌웨어에 박지 않는다. 호스트(웹/CLI)가 런타임에
+ * cli_wifi_config.yaml 을 읽어 시리얼 'WIFI_CONNECT <ssid>\t<pw>' 명령으로 주입하면 그때
+ * do_wifi_connect 가 접속을 시도한다. (예전엔 빌드 시 wifi_credentials.h 로
+ * 주입했으나, 비밀번호가 .bin 에 평문으로 굳고 cli_wifi_config.yaml 변경 시 재빌드가
+ * 필요해 런타임 주입으로 바꿨다.) */
 
 static const char *TAG = "diag";
 
@@ -307,7 +300,8 @@ static void report_wifi(char *out, size_t n)
     }
 
     /* DIAG_WIFI {"ap_count":15,"strongest_rssi":-42,
-     *            "aps":[{"ssid":"AP","rssi":-42,"ch":6}, ...]} */
+     *            "aps":[{"ssid":"AP","rssi":-42,"ch":6,"auth":3}, ...]}
+     *   auth: wifi_auth_mode_t (0=OPEN 개방형, 그 외=암호화 — 호스트가 자물쇠 표시). */
     int off = snprintf(out, n, "DIAG_WIFI {\"ap_count\":%d,", ap_count);
     if (have_rssi) {
         off += snprintf(out + off, (off < (int)n) ? n - off : 0,
@@ -320,8 +314,9 @@ static void report_wifi(char *out, size_t n)
         char ssid_esc[80];
         json_escape((const char *)records[i].ssid, ssid_esc, sizeof(ssid_esc));
         off += snprintf(out + off, (off < (int)n) ? n - off : 0,
-                        "%s{\"ssid\":\"%s\",\"rssi\":%d,\"ch\":%d}",
-                        i ? "," : "", ssid_esc, records[i].rssi, records[i].primary);
+                        "%s{\"ssid\":\"%s\",\"rssi\":%d,\"ch\":%d,\"auth\":%d}",
+                        i ? "," : "", ssid_esc, records[i].rssi,
+                        records[i].primary, records[i].authmode);
         if (off >= (int)n - 4) { break; }  /* 버퍼 한계 방지(이후 AP 생략) */
     }
     snprintf(out + off, (off < (int)n) ? n - off : 0, "]}");
@@ -334,30 +329,54 @@ fail:
 }
 
 /* ----------------------------------------------------------------------- */
-/* WiFi 접속 테스트 (config.yaml 자격증명)                                 */
+/* WiFi 접속 테스트 (런타임 주입)                                          */
 /*  - report_wifi() 가 STA 모드로 WiFi 를 이미 start 한 상태에서 호출된다.  */
-/*  - DIAG_WIFI_SSID 가 비어 있으면(자격증명 미설정) attempted=false 로     */
-/*    보고하고 생략. 설정돼 있으면 접속 시도 후 IP 획득 여부를 보고한다.    */
+/*  - 호스트가 'WIFI_CONNECT <ssid>\t<pw>' 명령으로 자격증명을 주면 그 AP    */
+/*    로 접속을 시도하고 IP 획득 여부를 보고한다(부팅 시 자동 접속 없음).   */
 /* ----------------------------------------------------------------------- */
 #define WIFI_CONN_OK_BIT   BIT0
 #define WIFI_CONN_FAIL_BIT BIT1
+#define WIFI_CLEAN_BIT     BIT2  /* 정리 단계: 직전 연결이 실제로 끊겼다는 신호 */
 
 static EventGroupHandle_t s_wifi_conn_eg;
 static char s_wifi_ip[16];
 static int s_wifi_retry;
+static int s_wifi_disc_reason;  /* 마지막 STA 끊김 reason(접속 실패 원인 진단용) */
+static int s_wifi_phase;        /* 0=정리(직전 연결 끊기), 1=접속 시도 */
 
 static void wifi_conn_event_handler(void *arg, esp_event_base_t base,
                                     int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        /* 최대 3회 재시도 후 실패 처리(잘못된 비밀번호/범위 밖 등). */
-        if (s_wifi_retry < 3) {
+        wifi_event_sta_disconnected_t *d = (wifi_event_sta_disconnected_t *)data;
+        uint8_t reason = d ? d->reason : 0;
+        s_wifi_disc_reason = reason;
+        if (s_wifi_phase == 0) {
+            /* 정리 단계: 직전 연결이 '실제로' 끊겼다는 신호. retry 하지 않는다. */
+            xEventGroupSetBits(s_wifi_conn_eg, WIFI_CLEAN_BIT);
+            return;
+        }
+        ESP_LOGW(TAG, "WiFi STA disconnected, reason=%d", reason);
+        /* '확실한' 실패(비번 명백히 틀림/AP 없음)만 즉시 보고한다. handshake/4way
+         * timeout(reason 15 등)은 '진짜 비번 오류'와 '일시적 실패'가 같은 코드로
+         * 섞여 나오므로, 1회 재시도해 일시적 실패를 흡수한다. 진짜 비번 오류면
+         * 재시도도 같은 reason 으로 실패해 결국 FAIL 로 보고된다(정확도 우선). */
+        bool hard_fail =
+            reason == WIFI_REASON_AUTH_FAIL ||
+            reason == WIFI_REASON_NO_AP_FOUND ||
+            reason == WIFI_REASON_AUTH_EXPIRE;
+        if (!hard_fail && s_wifi_retry < 1) {
             s_wifi_retry++;
             esp_wifi_connect();
         } else {
             xEventGroupSetBits(s_wifi_conn_eg, WIFI_CONN_FAIL_BIT);
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        if (s_wifi_phase == 0) {
+            /* 정리 단계의 GOT_IP(직전 성공 세션의 잔여)는 무시한다. 이걸 받아들이면
+             * '틀린 비번인데 직전 세션으로 성공'이 된다(재현된 핵심 버그). */
+            return;
+        }
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
         snprintf(s_wifi_ip, sizeof(s_wifi_ip), IPSTR, IP2STR(&event->ip_info.ip));
         xEventGroupSetBits(s_wifi_conn_eg, WIFI_CONN_OK_BIT);
@@ -368,9 +387,12 @@ static void wifi_conn_event_handler(void *arg, esp_event_base_t base,
  * 부팅 시(빌드 자격증명)와 런타임 명령(웹에서 AP 클릭) 양쪽에서 재사용한다. */
 static void do_wifi_connect(const char *ssid, const char *pw, char *out, size_t n)
 {
+    /* 핸들러를 '먼저' 등록하고 정리 단계 → 접속 단계 2단계로 진행한다.
+     * 핵심: 직전 성공 연결을 확실히 끊기 전에는 GOT_IP 를 받아들이지 않는다.
+     * (재현 결과: 직전 성공 세션이 남아 '틀린 비번인데 그 세션의 GOT_IP 로 성공'.) */
     s_wifi_conn_eg = xEventGroupCreate();
-    s_wifi_retry = 0;
     s_wifi_ip[0] = '\0';
+    s_wifi_disc_reason = 0;
 
     esp_event_handler_instance_t inst_wifi, inst_ip;
     esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
@@ -378,31 +400,56 @@ static void do_wifi_connect(const char *ssid, const char *pw, char *out, size_t 
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                         &wifi_conn_event_handler, NULL, &inst_ip);
 
+    /* 1) 정리 단계: 직전 연결을 끊고 DISCONNECTED 를 '실제로' 받을 때까지 기다린다.
+     *    이미 끊겨 있으면 이벤트가 안 와 타임아웃(정상). 이 단계의 GOT_IP 는 무시된다. */
+    s_wifi_phase = 0;
+    esp_wifi_disconnect();
+    xEventGroupWaitBits(s_wifi_conn_eg, WIFI_CLEAN_BIT,
+                        pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    /* 2) 새 자격증명 적용 후 접속 단계로 전환. */
     wifi_config_t wc = { 0 };
     strncpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid) - 1);
     strncpy((char *)wc.sta.password, pw, sizeof(wc.sta.password) - 1);
-    esp_wifi_disconnect();  /* 이전 연결이 있으면 정리(런타임 재시도 대비) */
     esp_wifi_set_config(WIFI_IF_STA, &wc);
-    esp_wifi_connect();
 
-    /* IP 획득 또는 실패까지 최대 ~12초 대기. */
+    s_wifi_phase = 1;
+    s_wifi_retry = 0;
+    s_wifi_ip[0] = '\0';
+    xEventGroupClearBits(s_wifi_conn_eg, WIFI_CONN_OK_BIT | WIFI_CONN_FAIL_BIT);
+
+    /* 3) 접속 시도. IP 획득 또는 실패까지 대기(retry 1회 흡수하도록 ~15초). */
+    esp_wifi_connect();
     EventBits_t bits = xEventGroupWaitBits(
         s_wifi_conn_eg, WIFI_CONN_OK_BIT | WIFI_CONN_FAIL_BIT,
-        pdFALSE, pdFALSE, pdMS_TO_TICKS(12000));
+        pdFALSE, pdFALSE, pdMS_TO_TICKS(15000));
 
+    /* 5) 판정. GOT_IP 만으로 믿지 않고, 실제로 '요청한 SSID' 에 붙었는지
+     *    esp_wifi_sta_get_ap_info() 로 한 번 더 확인한다(이중 방어). 끊겼거나
+     *    엉뚱한 AP 면 NOT_CONNECT/다른 ssid 로 잡혀 실패로 처리된다. */
     char ssid_esc[80];
     json_escape(ssid, ssid_esc, sizeof(ssid_esc));
-    if (bits & WIFI_CONN_OK_BIT) {
+    wifi_ap_record_t ap_info;
+    bool really_connected =
+        (bits & WIFI_CONN_OK_BIT) &&
+        esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK &&
+        strncmp((const char *)ap_info.ssid, ssid, sizeof(ap_info.ssid)) == 0;
+
+    if (really_connected) {
         /* DIAG_WIFI_CONNECT {"attempted":true,"connected":true,"ssid":"..","ip":"x.x.x.x"} */
         snprintf(out, n,
                  "DIAG_WIFI_CONNECT {\"attempted\":true,\"connected\":true,"
                  "\"ssid\":\"%s\",\"ip\":\"%s\"}",
                  ssid_esc, s_wifi_ip);
     } else {
+        /* 실패 시 끊김 reason 을 함께 실어 원인 진단을 돕는다(2=AUTH_EXPIRE,
+         * 15=4WAY_HANDSHAKE_TIMEOUT(비번 오류 흔함), 201=NO_AP_FOUND, 202=AUTH_FAIL,
+         * 205=CONNECTION_FAIL 등). */
         snprintf(out, n,
                  "DIAG_WIFI_CONNECT {\"attempted\":true,\"connected\":false,"
-                 "\"ssid\":\"%s\",\"ip\":null}",
-                 ssid_esc);
+                 "\"ssid\":\"%s\",\"ip\":null,\"reason\":%d}",
+                 ssid_esc, s_wifi_disc_reason);
     }
 
     /* 정리. */
@@ -412,19 +459,10 @@ static void do_wifi_connect(const char *ssid, const char *pw, char *out, size_t 
     vEventGroupDelete(s_wifi_conn_eg);
 }
 
-/* 부팅 시 호출: 빌드 주입 자격증명(config.yaml)으로 접속 테스트. */
-static void report_wifi_connect(char *out, size_t n)
-{
-    if (DIAG_WIFI_SSID[0] == '\0') {
-        /* 자격증명 미설정 — 생략(호스트가 SKIP). 웹에서 AP 클릭 시 런타임 명령으로 시도. */
-        snprintf(out, n, "DIAG_WIFI_CONNECT {\"attempted\":false}");
-        return;
-    }
-    do_wifi_connect(DIAG_WIFI_SSID, DIAG_WIFI_PASSWORD, out, n);
-}
-
 /* 런타임 WiFi 접속 결과를 보관하는 전역 버퍼(반복 출력에 쓰임).
- * 부팅 시 report_wifi_connect 가, 이후 웹 명령(serial_cmd_task)이 갱신한다. */
+ * 기본값은 {"attempted":false}(호스트가 SKIP). 부팅 시 자동 접속은 하지 않고,
+ * 호스트(웹/CLI)가 런타임에 cli_wifi_config.yaml 을 읽어 'WIFI_CONNECT' 명령을 보내면
+ * serial_cmd_task→do_wifi_connect 가 이 버퍼를 갱신한다. */
 static char g_wifi_conn_line[200] = "DIAG_WIFI_CONNECT {\"attempted\":false}";
 
 /* ----------------------------------------------------------------------- */
@@ -681,8 +719,14 @@ static void handle_command(const char *line)
         return;
     }
     char tmp[200];
+    /* do_wifi_connect 는 수 초 블로킹이다. 그동안 메인 루프가 '직전' 결과를 계속
+     * 출력하면 호스트가 그걸 '새 결과'로 오인한다(틀린 비번인데 직전 성공이 보임 —
+     * 이게 진짜 원인이었다). 명령 받자마자 결과를 무효화(attempted:false)해 직전
+     * 값을 지우고, do_wifi_connect 완료 후 진짜 결과로 한 번에 교체한다. */
+    strncpy(g_wifi_conn_line, "DIAG_WIFI_CONNECT {\"attempted\":false}",
+            sizeof(g_wifi_conn_line) - 1);
+    g_wifi_conn_line[sizeof(g_wifi_conn_line) - 1] = '\0';
     do_wifi_connect(ssid, pw, tmp, sizeof(tmp));
-    /* 한 번에 교체(반복 출력 루프가 중간 상태를 읽지 않도록). */
     strncpy(g_wifi_conn_line, tmp, sizeof(g_wifi_conn_line) - 1);
     g_wifi_conn_line[sizeof(g_wifi_conn_line) - 1] = '\0';
 }
@@ -701,6 +745,11 @@ static void serial_cmd_task(void *arg)
             line[li] = '\0';
             if (li > 0) {
                 handle_command(line);
+                /* 접속 시도(do_wifi_connect, 수 초 블로킹) 동안 호스트의 재전송
+                 * 명령이 UART 버퍼에 쌓였을 수 있다. 그대로 두면 같은 접속을 연쇄로
+                 * 다시 시도해 결과가 계속 밀린다('접속 시도 중'이 안 끝남). 처리 후
+                 * 입력 버퍼를 비워 중복 명령을 버린다. */
+                uart_flush_input(UART_NUM_0);
             }
             li = 0;
         } else if (li < (int)sizeof(line) - 1) {
@@ -742,7 +791,9 @@ void app_main(void)
     report_led(led_line, sizeof(led_line));
     report_button(button_line, sizeof(button_line));
     report_wifi(wifi_line, sizeof(wifi_line));
-    report_wifi_connect(g_wifi_conn_line, sizeof(g_wifi_conn_line));
+    /* WiFi '접속' 테스트는 부팅 시 자동으로 하지 않는다(자격증명을 펌웨어에 박지
+     * 않기 위함). 호스트가 런타임에 'WIFI_CONNECT' 명령을 보내면 그때 갱신된다.
+     * g_wifi_conn_line 의 기본값 {"attempted":false} 는 호스트가 SKIP 처리. */
     report_ble(ble_line, sizeof(ble_line));
     report_temp(temp_line, sizeof(temp_line));
     report_gpio(gpio_line, sizeof(gpio_line));

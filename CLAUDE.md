@@ -46,10 +46,20 @@ localization, WiFi pose estimation.
 - 비밀값 / 토큰 / 경로 등 환경 의존 값은 **환경변수**로 관리하고, 코드에
   **하드코딩 금지**.
 - `.env`, `env/` 디렉터리는 **절대 commit 금지** (`.gitignore` 처리됨).
-- `config.yaml` 은 사용자 요청으로 **commit 포함**한다(WiFi SSID/비밀번호 등
-  자격증명이 들어갈 수 있으므로, 민감한 값을 넣을 때는 주의).
+- 설정 파일은 **관심사별로 분리**하고, 모두 commit 포함한다:
+  - `tools/board_check/cli_wifi_config.yaml` — **CLI 진단 전용** WiFi 자격증명(접속
+    테스트용). 사용자 요청으로 commit 포함(민감값 주의). `tools/board_check/config.py`
+    가 `BASE_DIR/cli_wifi_config.yaml` 로 읽어 실행 시 시리얼로 펌웨어에 런타임 주입.
+    **웹 대시보드는 이 파일을 쓰지 않는다**(사용자가 WiFi 탭에서 직접 입력).
+  - `csi/config_devices.yaml` — CSI tx/rx 디바이스 인벤토리(자격증명 아님, by-id
+    serial 매핑). `csi/collect/device_map.py` 가 읽는다.
+  - 전역(프로젝트 공통) 설정이 생기면 그때 **루트** `config.yaml` 을 만든다.
+- 비밀값 / 토큰 / 경로 등 환경 의존 값은 코드에 **하드코딩 금지**(환경변수 또는 위 설정).
 - 진단 도구의 상수(VID/PID, 타임아웃, 경로, 검사 항목)는
   `tools/board_check/config.py` 한 곳에 모은다. 값 변경은 가급적 이 파일만.
+- 스크립트 위치: board_check 전용 스크립트(`step01~03`, `gen_wifi_creds.py`)는
+  `tools/board_check/scripts/`, CSI/공용 스크립트(`csi_flash.sh`,
+  `csi_web_monitor.sh`, `install_esp_idf.sh`)는 루트 `scripts/` 에 둔다.
 
 ---
 

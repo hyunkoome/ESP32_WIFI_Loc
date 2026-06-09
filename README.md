@@ -27,6 +27,7 @@
 | [Espressif 생태계](docs/espressif.md) | Espressif GitHub 저장소 317개 전체를 프로젝트 관련도(★5~★1)로 정리 |
 | [보드 진단 도구](tools/board_check/README.md) | 보드 자동 진단 도구 사용법 (CLI + 웹) |
 | [진단 펌웨어](tools/board_check/firmware/README.md) | PSRAM/WiFi/LED/버튼 검사 펌웨어 빌드 |
+| [CSI 데이터 획득](csi/README.md) | CSI 송수신 펌웨어·수집·파싱·웹 모니터(tx/rx) |
 | [보드 하드웨어](hw/YD-ESP32-S3/README.KR.md) | YD-ESP32-S3 데이터시트/핀맵/스펙 |
 
 ## 하드웨어
@@ -66,25 +67,47 @@ PSRAM / WiFi 스캔·접속 / Bluetooth LE / RGB LED / BOOT 버튼 / 온도센�
 
 ```bash
 # [1단계] 펌웨어 빌드 (최초 1회 — ESP-IDF 없으면 자동 설치)
-bash scripts/step01_build_diag_firmware.sh
+bash tools/board_check/scripts/step01_build_diag_firmware.sh
 
 # [2단계] 보드 진단 (CLI) — 반복 실행 가능
-bash scripts/step02_run_cli_based_diagnostics.sh
+bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh
 
 # [3단계] (선택) 웹 대시보드로 진단 — 브라우저에서 http://127.0.0.1:8000
-bash scripts/step03_run_web_based_diagnostics.sh
+bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
 ```
 
-> WiFi **접속** 테스트는 저장소 루트의 `config.yaml` 에 적은 SSID/비밀번호로 실제
-> AP 에 붙어 봅니다(`config.yaml.example` 복사해 작성). 미설정 시 해당 항목만 SKIP.
+> WiFi **접속** 테스트는 `tools/board_check/cli_wifi_config.yaml` 의 `wifi.ssid`/`wifi.password` 로
+> 실제 AP 에 붙어 봅니다(실행 시 런타임에 읽어 시리얼로 주입 — 펌웨어 재빌드 불필요).
+> 미설정/빈 값이면 해당 항목만 SKIP.
 
 > [2단계]는 기본으로 **대화형 BOOT 버튼 검사**를 포함합니다 — 검사 끝에 보드별로
 > "BOOT 버튼을 누르세요" 안내가 나오면 누르면 됩니다. 끄려면 `--no-button-test`:
-> `bash scripts/step02_run_cli_based_diagnostics.sh --no-button-test`
+> `bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh --no-button-test`
 
 > [3단계] 웹 대시보드는 진단/WiFi/BLE 탭에서 결과를 보여주고 WiFi 접속·BLE 스캔을
 > 대화형으로 테스트합니다. 화면 예시는
 > [진단 펌웨어 README](tools/board_check/firmware/README.md#진단-결과-화면-웹-대시보드) 참고.
+
+## CSI 수집 (송수신 tx/rx)
+
+보드 진단이 끝났다면, ESP32-S3 들을 tx(송신)/rx(수신)로 나눠 CSI 를 수집합니다.
+송수신은 ESP-NOW 기반이라 라우터가 필요 없습니다. 자세히: [`csi/README.md`](csi/README.md).
+
+```bash
+# 1) tx/rx 매핑 작성 — 보드를 USB serial 로 고정 식별(ttyACM 번호 무관)
+ls /dev/serial/by-id/                          # serial 확인
+cp csi/config_devices.yaml.example csi/config_devices.yaml
+python csi/collect/device_map.py               # 매핑 확인
+
+# 2) role 에 맞는 펌웨어 빌드+flash (tx→csi_send, rx→csi_recv)
+bash scripts/csi_flash.sh
+
+# 3) CSI 수집 → CSV
+python csi/collect/serial_collector.py --role rx --out results/csi_run01.csv
+
+# 4) (선택) 웹 모니터 — 디바이스 상태 + CSI 라이브
+bash scripts/csi_web_monitor.sh                # http://127.0.0.1:8100
+```
 
 ## 개발 환경
 
@@ -126,25 +149,42 @@ CSI 연구에 들어가기 전, 먼저 구매한 ESP32-S3 보드들의 하드웨
 - **2/3단계 스크립트** — 빌드(step01)·CLI 진단(step02)·웹 대시보드(step03) 자동화
 - **문서** — 설치/펌웨어/Python 환경/USB 포트/Espressif 생태계 가이드
 
-### ⬜ 추가 예정 (To do · CSI 수집·센싱)
+### ✅ 완료 (CSI 데이터 획득)
 
-- **CSI 수집 펌웨어** — ESP32-S3 WiFi CSI 콜백 기반 패킷별 CSI 추출
-  ([esp-csi](docs/espressif.md) 참고)
-- **수집 파이프라인** — 호스트 측 CSI 스트림 수신·저장·라벨링, 데이터셋 구축
+- **CSI 송수신 펌웨어** — [esp-csi](docs/espressif.md) 기반 `csi_recv`/`csi_send`
+  (ESP-NOW, 라우터 불필요). N16R8(esp32s3) 맞춤 + 독립 빌드로 정리 ([`csi/firmware/`](csi/firmware/README.md))
+- **tx/rx 디바이스 매핑** — `config_devices.yaml` + by-id serial 로 보드 고정 식별
+  (ttyACM 번호 무관, tx/rx 다중 확장 가능)
+- **flash 자동화** — `scripts/csi_flash.sh` 가 role 에 맞는 펌웨어를 각 보드에 빌드+배포
+- **CSI 수집·파싱** — 시리얼 → CSV 수집기 + 진폭/위상 파서 ([`csi/collect`](csi/collect/README.md) · [`csi/analysis`](csi/analysis/README.md))
+- **웹 모니터** — 디바이스 상태 + CSI 라이브(rate/RSSI/진폭) ([`csi/web`](csi/web/README.md))
+- **GitHub CI** — 펌웨어 빌드(esp32s3) + Python lint 워크플로 ([`.github/workflows`](.github/workflows/))
+
+### ⬜ 추가 예정 (To do · 다중 수집·센싱)
+
 - **다중 보드 동시 CSI 수집** — 여러 ESP32-S3 동기 수집(다중 링크)
-- **학습/추론 코드** — presence / motion / breathing / gesture detection,
-  실내 위치 추정(localization), WiFi pose estimation
+- **데이터셋 구축** — 수집 CSI 라벨링·윈도우 분할
+- **학습/추론 코드** ([`sensing/`](sensing/README.md)) — 카메라 없이 CSI 만으로 실내
+  **다중 인원 감지 + 각 사람 pose 추정**(+ presence / motion / breathing / localization)
 
 ## 저장소 구조
 
 ```
 ESP32_WIFI_Loc/
+├── csi/                  # CSI 데이터 획득 계층
+│   ├── config_devices.yaml  #   tx/rx 디바이스 매핑(by-id)
+│   ├── firmware/         #   csi_recv / csi_send 펌웨어
+│   ├── collect/          #   시리얼 수집 + device_map
+│   ├── analysis/         #   CSI 파싱·전처리
+│   └── web/              #   웹 모니터(FastAPI)
+├── sensing/              # 응용 계층(예정): 다중 인원 감지 + pose 추정
 ├── hw/
 │   └── YD-ESP32-S3/      # 보드 하드웨어 자료(데이터시트/핀맵/벤더 펌웨어)
 ├── tools/
-│   └── board_check/      # 보드 자동 진단 도구 (+ firmware/ 진단 펌웨어)
+│   └── board_check/      # 보드 자동 진단 도구 (+ firmware/, cli_wifi_config.yaml)
 ├── docs/                 # 설치/환경/하드웨어 세부 문서
-├── scripts/              # 보조 스크립트 (ESP-IDF 설치 등)
+├── scripts/              # 보조 스크립트 (ESP-IDF 설치, csi_flash, csi_web_monitor 등)
+├── .github/workflows/    # CI (펌웨어 빌드 + Python lint)
 ├── CLAUDE.md             # Claude Code 작업 가이드라인
 ├── LICENSE               # AGPL v3
 └── README.md

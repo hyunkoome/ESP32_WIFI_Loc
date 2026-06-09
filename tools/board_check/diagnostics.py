@@ -43,6 +43,7 @@ def diagnose_board(
     stress: int = 0,
     min_ap: int = 1,
     progress: Optional[Callable[[str], None]] = None,
+    wifi_from_config: bool = True,
 ) -> Dict[str, object]:
     """
     보드 1대를 진단하고 결과 딕셔너리를 반환.
@@ -53,6 +54,9 @@ def diagnose_board(
     stress      : 스트레스 테스트 반복 횟수(0이면 비활성)
     min_ap      : WiFi PASS 판정 최소 AP 개수
     progress    : 진행 상황 콜백(문자열 메시지)
+    wifi_from_config: WiFi 접속 테스트 자격증명을 cli_wifi_config.yaml 에서 읽어
+                      런타임 주입할지 여부. CLI 는 True(자동 주입), 웹은 False
+                      (사용자가 WiFi 탭에서 직접 입력하므로 yaml 을 쓰지 않음).
 
     반환 구조:
       {
@@ -197,7 +201,9 @@ def diagnose_board(
     if use_firmware and connected:
         if firmware_mod.available():
             emit("진단 펌웨어 flash 및 WiFi/PSRAM 검사")
-            fw_diag = firmware_mod.run_firmware_diagnostics(port, use_sudo=use_sudo)
+            fw_diag = firmware_mod.run_firmware_diagnostics(
+                port, use_sudo=use_sudo, wifi_from_config=wifi_from_config
+            )
         else:
             emit("진단 펌웨어 바이너리 없음 — WiFi/PSRAM SKIP")
             errors.append("Firmware: 빌드된 진단 펌웨어가 없음 (firmware/README.md)")
@@ -239,7 +245,7 @@ def diagnose_board(
         sublist=wifi_res.get("sublist"),
     )
 
-    # 6-2b) WiFi 접속 테스트 — config.yaml 자격증명으로 실제 연결(빌드 시 주입).
+    # 6-2b) WiFi 접속 테스트 — cli_wifi_config.yaml 자격증명으로 실제 연결(런타임 시리얼 주입).
     wifi_conn_res = wifi_test.evaluate_wifi_connect(fw_diag if use_firmware else None)
     checks["wifi_connect"] = _check(
         wifi_conn_res["status"],

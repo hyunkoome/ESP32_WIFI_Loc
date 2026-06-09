@@ -9,6 +9,8 @@ let diagnosing = false;
 let diagBtns = [];
 let lastChecks = {};          // 마지막 진단 결과(WiFi/BLE 탭에서 사용)
 let pendingConnectSsid = null; // 접속 시도 중인 SSID
+const connectTimers = {};      // SSID별 응답 대기 타임아웃(버튼 자동 재활성용)
+let pendingArmed = false;      // 무효화(attempted:false)를 본 뒤의 결과만 진짜로 인정
 
 const $ = (id) => document.getElementById(id);
 const ICONS = {
@@ -196,6 +198,13 @@ function handleMsg(msg) {
     renderResult(msg.data);
     setTimeout(() => { $("progress-panel").hidden = true; }, 700);
     startLive();
+  } else if (msg.type === "restore") {
+    // 새로고침/재접속 시 서버가 보관한 마지막 결과로 화면을 조용히 복원한다
+    // (진행 애니메이션 없이). 라이브는 사용자가 버튼으로 다시 켤 수 있게 currentPort 만 세팅.
+    currentPort = msg.data.port;
+    renderResult(msg.data);
+    $("progress-panel").hidden = true;
+    $("btn-live").disabled = false;
   } else if (msg.type === "live") applyLive(msg.data);
   else if (msg.type === "live_stopped") {
     liveOn = false;
@@ -250,18 +259,19 @@ function renderWifiTab() {
   list.innerHTML = "";
   aps.forEach((a) => {
     const ssid = a.ssid || "<숨김 SSID>";
+    const isOpen = a.auth === 0;  // wifi_auth_mode_t 0 = WIFI_AUTH_OPEN(개방형)
     const row = document.createElement("div");
     row.className = "ap-item";
     row.innerHTML = `
       <div class="scan-row ap-head">
         ${signalBars(a.rssi)}
-        <span class="name">${escapeHtml(ssid)}</span>
+        <span class="name">${escapeHtml(ssid)} ${isOpen ? "🔓 개방형" : "🔒"}</span>
         <span class="rssi">${a.rssi} dBm</span>
         <span class="ch">ch${a.ch}</span>
         <span class="chevron">▾</span>
       </div>
       <div class="ap-form" hidden>
-        <input type="text" placeholder="비밀번호 (개방형이면 비워두기)" class="pw-input" />
+        <input type="text" placeholder="${isOpen ? "개방형 AP — 비밀번호 불필요" : "비밀번호 입력"}" class="pw-input" ${isOpen ? "disabled" : ""} />
         <button class="btn secondary toggle-pw" type="button" title="비밀번호 표시/숨김">🙈 숨기기</button>
         <button class="btn connect-btn">접속 테스트</button>
         <div class="ap-status muted"></div>
@@ -288,8 +298,19 @@ function doWifiConnect(ssid, pw) {
   if (!currentPort) { alert("먼저 진단을 실행하세요."); return; }
   if (!liveOn) startLive(); // 라이브 스트림으로 명령을 보내야 함
   pendingConnectSsid = ssid;
-  setWifiFormStatus(ssid, "⏳ 접속 시도 중… (최대 ~12초)", "");
+  pendingArmed = false;        // 무효화를 본 뒤의 결과만 인정(직전 결과 오인 방지)
+  setConnectBtn(ssid, true);   // 시도 중 — 버튼 비활성(중복 클릭 방지)
+  setWifiFormStatus(ssid, "⏳ 접속 시도 중…", "");
   send({ action: "wifi_connect", ssid, password: pw });
+  // 응답이 끝내 안 오면 버튼이 영영 잠기지 않도록 ~18초 후 자동 복구.
+  clearTimeout(connectTimers[ssid]);
+  connectTimers[ssid] = setTimeout(() => {
+    if (pendingConnectSsid === ssid) {
+      setWifiFormStatus(ssid, "응답 없음 — 다시 시도하세요", "fail");
+      pendingConnectSsid = null;
+    }
+    setConnectBtn(ssid, false);
+  }, 18000);
 }
 
 function setWifiFormStatus(ssid, text, cls) {
@@ -297,6 +318,20 @@ function setWifiFormStatus(ssid, text, cls) {
     if (row.dataset.ssid === ssid) {
       const s = row.querySelector(".ap-status");
       if (s) { s.textContent = text; s.className = "ap-status " + cls; }
+    }
+  });
+}
+
+// 접속 테스트 버튼 활성/비활성 — 시도 중(busy)엔 비활성해 중복 클릭(재전송 폭주)을 막는다.
+function setConnectBtn(ssid, busy) {
+  document.querySelectorAll(".ap-item").forEach((row) => {
+    if (row.dataset.ssid === ssid) {
+      const btn = row.querySelector(".connect-btn");
+      if (btn) {
+        btn.disabled = busy;
+        btn.textContent = busy ? "⏳ 시도 중…" : "접속 테스트";
+        btn.classList.toggle("loading", busy);
+      }
     }
   });
 }
@@ -369,8 +404,17 @@ function applyLive(cyc) {
 }
 
 function applyWifiConnect(wc) {
-  if (!wc || !wc.attempted) return;
+  if (!wc) return;
+  if (!wc.attempted) {
+    // 펌웨어가 명령 받고 직전 결과를 무효화함 = 처리 시작. 이후의 결과만 진짜로 인정.
+    if (pendingConnectSsid) pendingArmed = true;
+    return;
+  }
+  // 무효화를 아직 못 본 채(=명령 직후 남아있던 직전 결과)면 무시한다.
+  if (pendingConnectSsid && !pendingArmed) return;
   const ssid = wc.ssid;
+  clearTimeout(connectTimers[ssid]);  // 응답 도착 — 자동복구 타이머 해제
+  setConnectBtn(ssid, false);         // 버튼 재활성
   if (wc.connected) {
     updateCard("wifi_connect", "PASS", `'${ssid}' 접속 성공 — IP ${wc.ip}`);
     if (pendingConnectSsid && ssid === pendingConnectSsid) {
@@ -378,9 +422,10 @@ function applyWifiConnect(wc) {
       pendingConnectSsid = null;
     }
   } else {
-    updateCard("wifi_connect", "FAIL", `'${ssid}' 접속 실패`);
+    const rs = wc.reason != null ? ` (reason ${wc.reason})` : "";
+    updateCard("wifi_connect", "FAIL", `'${ssid}' 접속 실패${rs}`);
     if (pendingConnectSsid && ssid === pendingConnectSsid) {
-      setWifiFormStatus(ssid, "✗ 접속 실패 — 비밀번호/신호 확인", "fail");
+      setWifiFormStatus(ssid, `✗ 접속 실패 — 비밀번호/신호 확인${rs}`, "fail");
       pendingConnectSsid = null;
     }
   }
