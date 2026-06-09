@@ -160,9 +160,9 @@ void app_main()
              CONFIG_LESS_INTERFERENCE_CHANNEL, CONFIG_SEND_FREQUENCY, MAC2STR(CONFIG_CSI_SEND_MAC));
 
     for (uint32_t count = 0; ; ++count) {
-        /* 호스트(웹/GUI)가 보드 role 을 자동 감지하도록 부팅 직후 + ~3초마다 1회 출력.
+        /* 호스트(웹/GUI)가 보드 role 을 자동 감지하도록 부팅 직후 + ~1초마다 1회 출력.
          * tx 는 ESP-NOW 송신만 해 시리얼 출력이 적으므로 주기적 재출력이 필요하다. */
-        if (count % (CONFIG_SEND_FREQUENCY * 3) == 0) {
+        if (count % CONFIG_SEND_FREQUENCY == 0) {
             printf("DEVICE_ROLE {\"role\":\"tx\",\"fw\":\"csi_send\",\"ver\":1}\n");
         }
         esp_err_t ret = esp_now_send(peer.peer_addr, (const uint8_t *)&count, sizeof(count));

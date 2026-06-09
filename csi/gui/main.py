@@ -81,6 +81,8 @@ class MainWindow(QtWidgets.QMainWindow):
         ctl = QtWidgets.QHBoxLayout()
         ctl.addWidget(QtWidgets.QLabel("CSI rx:"))
         self.rx_combo = QtWidgets.QComboBox()
+        self.rx_combo.setMinimumWidth(280)
+        self.rx_combo.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
         ctl.addWidget(self.rx_combo)
         self.btn_stream = QtWidgets.QPushButton("▶ 스트림 시작")
         self.btn_stream.clicked.connect(self._toggle_stream)

@@ -164,7 +164,9 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
 #endif
     }
     esp_csi_gain_ctrl_get_gain_compensation(&compensate_gain, agc_gain, fft_gain);
-    ESP_LOGI(TAG, "compensate_gain %f, agc_gain %d, fft_gain %d", compensate_gain, agc_gain, fft_gain);
+    /* 매 패킷 로그는 시리얼을 포화시켜 호스트의 role 감지/CSI 파싱을 방해하므로
+     * ESP_LOGD 로 낮춘다(기본 로그레벨에서 출력 안 됨). 필요 시 verbose 로 확인. */
+    ESP_LOGD(TAG, "compensate_gain %f, agc_gain %d, fft_gain %d", compensate_gain, agc_gain, fft_gain);
 #endif
 
     uint32_t rx_id = *(uint32_t *)(info->payload + 15);
@@ -206,8 +208,9 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
     }
 #endif
     ets_printf("]\"\n");
-    /* 호스트의 role 자동 감지를 위해 주기적으로도 출력(부팅 직후 1회는 app_main 에서). */
-    if (s_count % 500 == 0) {
+    /* 호스트의 role 자동 감지를 위해 자주 출력(약 1.5초마다). 너무 드물면 호스트가
+     * 짧은 감지 윈도우 안에 못 잡는다. */
+    if (s_count % 50 == 0) {
         ets_printf("DEVICE_ROLE {\"role\":\"rx\",\"fw\":\"csi_recv\",\"ver\":1}\n");
     }
     s_count++;
