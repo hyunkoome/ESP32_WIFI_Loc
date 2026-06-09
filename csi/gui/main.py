@@ -147,6 +147,11 @@ class MainWindow(QtWidgets.QMainWindow):
             found = boards_mod.discover()
             self.bridge.boards_ready.emit([b.to_dict() for b in found])
             for b in found:
+                # 스트림 중인 포트는 role 재감지를 건너뛴다 — 같은 포트락을 스트림이
+                # 잡고 있어 role_detect 가 무한 대기(감지중 멈춤)에 빠지는 것을 막는다.
+                if b.port == self._stream_port:
+                    self.bridge.role_ready.emit(b.port, self._roles.get(b.port), "stream")
+                    continue
                 def det(port: str = b.port) -> None:
                     with port_lock(port):
                         role, src = role_detect.detect_role(port, timeout=4.0)
@@ -205,15 +210,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._append_log(f"--- flash {role} → {port} ---")
 
         def work() -> None:
-            with port_lock(port):
-                if not flasher.is_built(role):
-                    self.bridge.flash_line.emit("[build] 펌웨어 빌드(최초, 수 분 소요)...")
-                    rc = flasher.build(role, on_line=lambda l: self.bridge.flash_line.emit(l))
-                    if rc != 0:
-                        self.bridge.flash_done.emit(port, False)
-                        return
-                rc = flasher.flash(role, port, on_line=lambda l: self.bridge.flash_line.emit(l))
-                self.bridge.flash_done.emit(port, rc == 0)
+            try:
+                with port_lock(port):
+                    if not flasher.is_built(role):
+                        self.bridge.flash_line.emit("[build] 펌웨어 빌드(최초, 수 분 소요)...")
+                        rc = flasher.build(role, on_line=lambda l: self.bridge.flash_line.emit(l))
+                        if rc != 0:
+                            self.bridge.flash_done.emit(port, False)
+                            return
+                    rc = flasher.flash(role, port, on_line=lambda l: self.bridge.flash_line.emit(l))
+                    self.bridge.flash_done.emit(port, rc == 0)
+            except Exception as exc:  # 스레드 예외가 조용히 사라지지 않게 로그로 표면화.
+                self.bridge.flash_line.emit(f"[에러] flash 예외: {exc}")
+                self.bridge.flash_done.emit(port, False)
         threading.Thread(target=work, daemon=True).start()
 
     def _on_flash_done(self, port: str, ok: bool) -> None:
