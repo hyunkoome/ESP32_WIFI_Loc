@@ -100,9 +100,12 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
                rx_ctrl->aggregation, rx_ctrl->stbc, rx_ctrl->fec_coding, rx_ctrl->sgi,
                rx_ctrl->noise_floor, rx_ctrl->ampdu_cnt, rx_ctrl->channel, rx_ctrl->secondary_channel,
                rx_ctrl->timestamp, rx_ctrl->ant, rx_ctrl->sig_len, rx_ctrl->sig_mode);
-    ets_printf(",%d,%d,\"[%d", info->len, info->first_word_invalid, (int16_t)(compensate_gain * info->buf[0]));
+    /* compensate_gain 은 약신호(RSSI 낮음)에서 0 에 가까워(예: 0.002) raw 를 0 으로
+     * 반올림시킨다 — 라우터 CSI 가 전부 0 으로 보이던 원인. 시각화에는 raw buf 를 그대로
+     * 출력한다(거리별 정규화가 필요하면 2차에서 호스트가 한다). */
+    ets_printf(",%d,%d,\"[%d", info->len, info->first_word_invalid, info->buf[0]);
     for (int i = 1; i < info->len; i++) {
-        ets_printf(",%d", (int16_t)(compensate_gain * info->buf[i]));
+        ets_printf(",%d", info->buf[i]);
     }
     ets_printf("]\"\n");
 
@@ -114,14 +117,17 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
 
 static void wifi_csi_init(void)
 {
+    /* LLTF 중심: 라우터 ping 응답(legacy/non-HT)과 tx(HT) 둘 다 LLTF 부분의 CSI 를
+     * 받는다. HT-LTF(htltf_en)를 켜면 legacy 패킷에서 그 부분이 0 으로 채워져 raw_csi
+     * 가 전부 0 이 되는 문제가 있었다(원본 csi_recv_router 와 동일 설정으로 수정). */
     wifi_csi_config_t csi_config = {
         .lltf_en           = true,
-        .htltf_en          = true,
-        .stbc_htltf2_en    = true,
+        .htltf_en          = false,
+        .stbc_htltf2_en    = false,
         .ltf_merge_en      = true,
         .channel_filter_en = true,
-        .manu_scale        = false,
-        .shift             = false,
+        .manu_scale        = true,
+        .shift             = true,
     };
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));  /* ESP-NOW + 라우터 둘 다 */
     ESP_ERROR_CHECK(esp_wifi_set_csi_config(&csi_config));
@@ -188,6 +194,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
 static void connect_router(const char *ssid, const char *pw)
 {
     s_have_bssid = false;
+    /* STA 연결 라우터 CSI 는 promiscuous 를 꺼야 받힌다. promiscuous=true(ESP-NOW 용)인
+     * 채로 STA 연결 CSI 를 받으면 raw buf 가 전부 0 으로 나오는 문제가 있었다. */
+    esp_wifi_set_promiscuous(false);
     wifi_config_t wc = {0};
     strncpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid) - 1);
     strncpy((char *)wc.sta.password, pw, sizeof(wc.sta.password) - 1);
@@ -200,6 +209,20 @@ static void connect_router(const char *ssid, const char *pw)
 /* ---- 런타임 시리얼 명령(board_check 패턴): "WIFI_CONNECT <ssid>\t<pw>" ---- */
 static void handle_command(const char *line)
 {
+    /* 라우터 연결을 끊고 ESP-NOW 채널로 복귀 — tx 신호원으로 돌아갈 때. */
+    if (strcmp(line, "WIFI_DISCONNECT") == 0) {
+        s_have_bssid = false;
+        if (s_ping) {
+            esp_ping_stop(s_ping);
+            esp_ping_delete_session(s_ping);
+            s_ping = NULL;
+        }
+        esp_wifi_disconnect();
+        esp_wifi_set_channel(CONFIG_LESS_INTERFERENCE_CHANNEL, WIFI_SECOND_CHAN_BELOW);
+        esp_wifi_set_promiscuous(true);  /* ESP-NOW(tx) 다시 수신 */
+        ets_printf("CSI_WIFI {\"connected\":false}\n");
+        return;
+    }
     const char *prefix = "WIFI_CONNECT ";
     size_t plen = strlen(prefix);
     if (strncmp(line, prefix, plen) != 0) {

@@ -213,14 +213,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self._want_source = "all"
         else:
             self._want_source = "tx"
+            # tx 로 복귀: 라우터 연결을 끊어 ESP-NOW 채널(11)로 돌아간다(tx CSI 재수신).
+            if self._send_q is not None:
+                self._send_q.put("WIFI_DISCONNECT")
+                self._append_log("WIFI_DISCONNECT 전송 → tx(ESP-NOW) 채널 복귀")
         self._wf = None  # 신호원이 바뀌면 워터폴/도플러 누적을 초기화
         self._append_log(f"신호원 → {self._want_source}")
 
     def _read_wifi_config(self) -> tuple[str, str]:
-        """cli_wifi_config.yaml 에서 (ssid, pw). 없으면 ('', '')."""
+        """config/wifi_config.yaml 에서 (ssid, pw). 없으면 ('', '')."""
         try:
             import yaml
-            p = Path(__file__).resolve().parents[2] / "tools" / "board_check" / "cli_wifi_config.yaml"
+            p = Path(__file__).resolve().parents[2] / "config" / "wifi_config.yaml"
             cfg = yaml.safe_load(p.read_text()) or {}
             w = cfg.get("wifi") or {}
             return str(w.get("ssid") or ""), str(w.get("password") or "")

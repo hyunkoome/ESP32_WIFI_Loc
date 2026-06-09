@@ -150,14 +150,13 @@ def ensure_results_dir() -> Path:
 
 
 # ---------------------------------------------------------------------------
-# 사용자 설정 파일 (cli_wifi_config.yaml)
+# 사용자 설정 파일 (config/wifi_config.yaml)
 # ---------------------------------------------------------------------------
-# board_check 전용 cli_wifi_config.yaml 에서 WiFi 자격증명 등 환경 의존 값을 읽는다.
-# (이 파일은 board_check 디렉터리 안에 둔다 — 진단 도구 전용 설정이므로.)
-# cli_wifi_config.yaml 은 자격증명을 포함하지만 사용자 요청으로 commit 에 포함한다.
+# 프로젝트 공통 WiFi 자격증명을 루트 config/wifi_config.yaml 에서 읽는다(board_check 와
+# CSI GUI/web 이 공유). 자격증명을 포함하지만 사용자 요청으로 commit 에 포함한다.
 # 값은 실행 시 런타임에 읽혀 시리얼로 펌웨어에 주입된다(빌드 시 주입 아님).
 # PyYAML 미설치/파일 부재 시 빈 설정으로 폴백.
-USER_CONFIG_YAML = BASE_DIR / "cli_wifi_config.yaml"
+USER_CONFIG_YAML = BASE_DIR.parent.parent / "config" / "wifi_config.yaml"
 
 try:
     import yaml  # PyYAML
