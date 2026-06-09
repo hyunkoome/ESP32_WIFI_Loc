@@ -93,21 +93,20 @@ bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
 보드 진단이 끝났다면, ESP32-S3 들을 tx(송신)/rx(수신)로 나눠 CSI 를 수집합니다.
 송수신은 ESP-NOW 기반이라 라우터가 필요 없습니다. 자세히: [`csi/README.md`](csi/README.md).
 
+보드는 부팅 시 `DEVICE_ROLE` 을 출력해 **tx/rx 가 자동 표시**됩니다(매핑 파일 불필요).
+**연결만 하면** 대시보드가 감지하고, 보드별로 tx/rx 펌웨어를 골라 다운로드합니다.
+
 ```bash
-# 1) tx/rx 매핑 작성 — 보드를 USB serial 로 고정 식별(ttyACM 번호 무관)
-ls /dev/serial/by-id/                          # serial 확인
-cp csi/config_devices.yaml.example csi/config_devices.yaml
-python csi/collect/device_map.py               # 매핑 확인
+# 웹 대시보드 — 보드 실시간 감지 + tx/rx 펌웨어 다운로드 + CSI 진폭/위상 라이브
+bash scripts/csi_app.sh                        # http://127.0.0.1:8200
+#   또는 데스크톱 GUI(동일 기능): bash scripts/csi_gui.sh
 
-# 2) role 에 맞는 펌웨어 빌드+flash (tx→csi_send, rx→csi_recv)
-bash scripts/csi_flash.sh
-
-# 3) CSI 수집 → CSV
+# (CLI) CSI 수집 → CSV : --role 은 연결 보드를 실시간 감지해 선택
 python csi/collect/serial_collector.py --role rx --out results/csi_run01.csv
-
-# 4) (선택) 웹 모니터 — 디바이스 상태 + CSI 라이브
-bash scripts/csi_web_monitor.sh                # http://127.0.0.1:8100
 ```
+
+> CSI 센싱은 **tx–rx 를 2~5m 띄워** 그 사이로 사람이 지나가게 배치합니다(붙여 두면
+> 감지 영역이 없음). 위치/다중 인원 정확도를 높이려면 **rx(앵커)를 여러 곳에 분산**하세요.
 
 ## 개발 환경
 
@@ -152,12 +151,14 @@ CSI 연구에 들어가기 전, 먼저 구매한 ESP32-S3 보드들의 하드웨
 ### ✅ 완료 (CSI 데이터 획득)
 
 - **CSI 송수신 펌웨어** — [esp-csi](docs/espressif.md) 기반 `csi_recv`/`csi_send`
-  (ESP-NOW, 라우터 불필요). N16R8(esp32s3) 맞춤 + 독립 빌드로 정리 ([`csi/firmware/`](csi/firmware/README.md))
-- **tx/rx 디바이스 매핑** — `config_devices.yaml` + by-id serial 로 보드 고정 식별
-  (ttyACM 번호 무관, tx/rx 다중 확장 가능)
-- **flash 자동화** — `scripts/csi_flash.sh` 가 role 에 맞는 펌웨어를 각 보드에 빌드+배포
-- **CSI 수집·파싱** — 시리얼 → CSV 수집기 + 진폭/위상 파서 ([`csi/collect`](csi/collect/README.md) · [`csi/analysis`](csi/analysis/README.md))
-- **웹 모니터** — 디바이스 상태 + CSI 라이브(rate/RSSI/진폭) ([`csi/web`](csi/web/README.md))
+  (ESP-NOW, 라우터 불필요). 부팅 시 `DEVICE_ROLE` 출력으로 **tx/rx 자동 감지** ([`csi/firmware/`](csi/firmware/README.md))
+- **보드 실시간 감지 + role 자동표시** — `config_devices.yaml` 없이 연결만 하면 by-id
+  로 감지하고 펌웨어 `DEVICE_ROLE` 로 tx/rx 를 자동 판별 ([`csi/common`](csi/README.md))
+- **멀티보드 펌웨어 다운로드** — web/GUI 대시보드에서 보드별 tx/rx 펌웨어 선택 flash
+  (`scripts/csi_flash.sh` role+port 인자, merge-bin)
+- **CSI 진폭/위상 실시간 시각화** — **web**(`scripts/csi_app.sh`) 과 **데스크톱 GUI**
+  (PyQt5+pyqtgraph, `scripts/csi_gui.sh`) 둘 다, 공용 백엔드(`csi/common`) 공유
+- **CSI 수집·파싱** — 시리얼 → CSV 수집기(`--role` 실시간 감지) + 진폭/위상 파서 ([`csi/collect`](csi/collect/README.md) · [`csi/analysis`](csi/analysis/README.md))
 - **GitHub CI** — 펌웨어 빌드(esp32s3) + Python lint 워크플로 ([`.github/workflows`](.github/workflows/))
 
 ### ⬜ 추가 예정 (To do · 다중 수집·센싱)
@@ -172,18 +173,19 @@ CSI 연구에 들어가기 전, 먼저 구매한 ESP32-S3 보드들의 하드웨
 ```
 ESP32_WIFI_Loc/
 ├── csi/                  # CSI 데이터 획득 계층
-│   ├── config_devices.yaml  #   tx/rx 디바이스 매핑(by-id)
-│   ├── firmware/         #   csi_recv / csi_send 펌웨어
-│   ├── collect/          #   시리얼 수집 + device_map
+│   ├── firmware/         #   csi_recv / csi_send 펌웨어(부팅 시 DEVICE_ROLE 출력)
+│   ├── common/           #   web/GUI 공용 백엔드(보드 감지·role·flash·CSI 스트림)
+│   ├── collect/          #   시리얼 수집(--role 실시간 감지)
 │   ├── analysis/         #   CSI 파싱·전처리
-│   └── web/              #   웹 모니터(FastAPI)
-├── sensing/              # 응용 계층(예정): 다중 인원 감지 + pose 추정
+│   ├── web/              #   웹 대시보드(FastAPI): 감지·flash·진폭/위상 라이브
+│   └── gui/              #   데스크톱 GUI(PyQt5+pyqtgraph): web 과 동일 백엔드
+├── sensing/              # 응용 계층(예정): 다중 인원 감지 + pose/위치 추정
 ├── hw/
 │   └── YD-ESP32-S3/      # 보드 하드웨어 자료(데이터시트/핀맵/벤더 펌웨어)
 ├── tools/
 │   └── board_check/      # 보드 자동 진단 도구 (+ firmware/, cli_wifi_config.yaml)
 ├── docs/                 # 설치/환경/하드웨어 세부 문서
-├── scripts/              # 보조 스크립트 (ESP-IDF 설치, csi_flash, csi_web_monitor 등)
+├── scripts/              # 보조 스크립트 (csi_flash, csi_app, csi_gui, install_esp_idf 등)
 ├── .github/workflows/    # CI (펌웨어 빌드 + Python lint)
 ├── CLAUDE.md             # Claude Code 작업 가이드라인
 ├── LICENSE               # AGPL v3

@@ -1,0 +1,5 @@
+# CSI 데스크톱 GUI(csi/gui/main.py) 의존성.
+# 보드 감지/flash 는 tools/board_check/requirements.txt(esptool, pyserial)도 필요.
+PyQt5>=5.15
+pyqtgraph>=0.13
+pyserial>=3.5

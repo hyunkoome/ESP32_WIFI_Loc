@@ -51,8 +51,9 @@ localization, WiFi pose estimation.
     테스트용). 사용자 요청으로 commit 포함(민감값 주의). `tools/board_check/config.py`
     가 `BASE_DIR/cli_wifi_config.yaml` 로 읽어 실행 시 시리얼로 펌웨어에 런타임 주입.
     **웹 대시보드는 이 파일을 쓰지 않는다**(사용자가 WiFi 탭에서 직접 입력).
-  - `csi/config_devices.yaml` — CSI tx/rx 디바이스 인벤토리(자격증명 아님, by-id
-    serial 매핑). `csi/collect/device_map.py` 가 읽는다.
+  - CSI tx/rx 보드 식별은 **파일이 아니라 실시간 감지**로 한다 — 보드가 부팅 시
+    출력하는 `DEVICE_ROLE` 로 tx/rx 를 자동 판별(`csi/common/role_detect.py`),
+    by-id 로 보드 고정 식별(`csi/common/boards.py`). config_devices.yaml 은 없앴다.
   - 전역(프로젝트 공통) 설정이 생기면 그때 **루트** `config.yaml` 을 만든다.
 - 비밀값 / 토큰 / 경로 등 환경 의존 값은 코드에 **하드코딩 금지**(환경변수 또는 위 설정).
 - 진단 도구의 상수(VID/PID, 타임아웃, 경로, 검사 항목)는
