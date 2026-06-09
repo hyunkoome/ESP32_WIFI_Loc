@@ -1,147 +1,164 @@
 "use strict";
 
-// CSI 웹 모니터 프론트엔드.
-//  - /api/devices 를 주기적으로 폴링해 디바이스 상태판을 갱신.
-//  - rx 카드의 "모니터 시작" → WebSocket(/ws) 으로 해당 보드 CSI 스트림 구독.
-//  - 수신한 진폭 배열을 canvas 막대그래프로 그린다(외부 차트 라이브러리 없음).
+// CSI 통합 대시보드 프론트엔드.
+//  - WebSocket(/ws) 으로 보드 감지(refresh) / role 자동표시 / tx·rx flash / CSI 스트림.
+//  - 진폭·위상은 canvas 라인차트로 그린다(외부 차트 라이브러리 없음).
 
-const el = (id) => document.getElementById(id);
-const wsState = el("ws-state");
+const $ = (id) => document.getElementById(id);
 
 let ws = null;
-let activeDevice = null;
+let boards = [];          // [{port, serial, by_id, vid_pid, accessible, ...}]
+let roles = {};           // port -> {role, source}
+let streaming = false;
 
-// ---- 디바이스 상태판 -------------------------------------------------------
-async function loadDevices() {
-  try {
-    const res = await fetch("/api/devices");
-    const data = await res.json();
-    renderDevices(data.devices || []);
-  } catch (e) {
-    el("devices").innerHTML = `<p class="hint">디바이스 조회 실패: ${e}</p>`;
+// ---- WebSocket -------------------------------------------------------------
+function connectWs() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => {
+    $("ws-status").textContent = "WebSocket: 연결됨";
+    $("ws-status").className = "ws-on";
+    refresh();
+  };
+  ws.onclose = () => {
+    $("ws-status").textContent = "WebSocket: 끊김 — 재연결";
+    $("ws-status").className = "ws-off";
+    setTimeout(connectWs, 1500);
+  };
+  ws.onmessage = (ev) => handle(JSON.parse(ev.data));
+}
+function send(o) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); }
+function refresh() { $("board-list").textContent = "탐색 중…"; send({ action: "refresh" }); }
+
+function handle(m) {
+  if (m.type === "boards") {
+    boards = m.boards; roles = {};
+    renderBoards(); renderRxSelect();
+  } else if (m.type === "role") {
+    roles[m.port] = { role: m.role, source: m.source };
+    renderBoards(); renderRxSelect();
+  } else if (m.type === "flash_progress") {
+    appendLog(m.line);
+  } else if (m.type === "flash_done") {
+    appendLog(m.ok ? `✓ flash 완료 (${m.port})` : `✗ flash 실패 (${m.port}) ${m.msg || ""}`);
+  } else if (m.type === "csi") {
+    drawCsi(m);
+  } else if (m.type === "stream_stopped") {
+    streaming = false; $("btn-stream").textContent = "▶ 스트림 시작";
+    if (m.error) appendLog("스트림: " + m.error);
   }
 }
 
-function renderDevices(devices) {
-  const grid = el("devices");
-  grid.innerHTML = "";
-  if (!devices.length) {
-    grid.innerHTML = `<p class="hint">esp32_device.yaml 의 devices 가 비어 있습니다.</p>`;
-    return;
-  }
-  for (const d of devices) {
+// ---- 보드 카드 -------------------------------------------------------------
+function renderBoards() {
+  const box = $("board-list");
+  if (!boards.length) { box.innerHTML = '<p class="hint">연결된 보드가 없습니다.</p>'; return; }
+  box.innerHTML = "";
+  for (const b of boards) {
+    const r = roles[b.port];
+    let badge;
+    if (!r) badge = '<span class="badge detecting">감지중…</span>';
+    else if (r.role === "tx") badge = '<span class="badge tx">TX</span>';
+    else if (r.role === "rx") badge = '<span class="badge rx">RX</span>';
+    else badge = '<span class="badge unknown">role?</span>';
+
     const card = document.createElement("div");
     card.className = "card";
-    const dot = d.connected ? "on" : "off";
-    const portTxt = d.port || "(미연결)";
     card.innerHTML = `
       <div class="row">
-        <span class="name"><span class="dot ${dot}"></span>${d.name}</span>
-        <span class="badge ${d.role}">${d.role}</span>
+        <span class="name">${b.port}</span>${badge}
       </div>
-      <div class="meta">serial: ${d.serial}</div>
-      <div class="meta">port: ${portTxt}</div>
-      <div class="meta">firmware: ${d.firmware || "-"}</div>
-    `;
-    if (d.role === "rx" && d.connected) {
-      const btn = document.createElement("button");
-      btn.className = "btn-mini";
-      btn.textContent = "모니터 시작";
-      btn.onclick = () => startMonitor(d.name);
-      card.appendChild(btn);
-    }
-    grid.appendChild(card);
+      <div class="meta">serial: ${b.serial || "-"} · ${b.vid_pid}${b.accessible ? "" : ' · <b class="warn">권한없음</b>'}</div>
+      <div class="meta byid">${b.by_id || ""}</div>
+      <div class="actions">
+        <button class="btn-mini tx" data-port="${b.port}" data-role="tx">tx flash</button>
+        <button class="btn-mini rx" data-port="${b.port}" data-role="rx">rx flash</button>
+      </div>`;
+    card.querySelectorAll(".actions .btn-mini").forEach((btn) => {
+      btn.onclick = () => {
+        const role = btn.dataset.role, port = btn.dataset.port;
+        if (!confirm(`${port} 에 ${role} 펌웨어를 flash할까요? (보드의 기존 펌웨어를 덮어씁니다)`)) return;
+        $("log-panel").hidden = false;
+        appendLog(`--- flash ${role} → ${port} ---`);
+        send({ action: "flash", role, port });
+      };
+    });
+    box.appendChild(card);
   }
 }
 
-// ---- WebSocket CSI 스트림 --------------------------------------------------
-function ensureWs() {
-  if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws = new WebSocket(`${proto}://${location.host}/ws`);
-    ws.onopen = () => {
-      wsState.textContent = "WebSocket: 연결됨";
-      wsState.className = "ws-on";
-      resolve();
-    };
-    ws.onclose = () => {
-      wsState.textContent = "WebSocket: 미연결";
-      wsState.className = "ws-off";
-    };
-    ws.onerror = (e) => reject(e);
-    ws.onmessage = (ev) => handleMessage(JSON.parse(ev.data));
-  });
-}
-
-async function startMonitor(deviceName) {
-  await ensureWs();
-  activeDevice = deviceName;
-  el("live-target").textContent = `수신: ${deviceName}`;
-  el("stop").disabled = false;
-  ws.send(JSON.stringify({ action: "start", device: deviceName }));
-}
-
-function stopMonitor() {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ action: "stop" }));
+function renderRxSelect() {
+  const sel = $("rx-select");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  for (const b of boards) {
+    const r = roles[b.port];
+    const opt = document.createElement("option");
+    opt.value = b.port;
+    opt.textContent = `${b.port}${r && r.role ? ` (${r.role})` : ""}`;
+    sel.appendChild(opt);
   }
-  el("stop").disabled = true;
+  if (prev) sel.value = prev;
 }
 
-function handleMessage(msg) {
-  if (msg.type === "csi") {
-    el("m-rate").textContent = msg.rate;
-    el("m-rssi").textContent = msg.rssi;
-    el("m-sub").textContent = msg.n_sub;
-    drawAmplitude(msg.amplitude || []);
-  } else if (msg.type === "status") {
-    el("live-target").textContent = `${activeDevice || ""} — ${msg.msg}`;
-  } else if (msg.type === "stopped") {
-    el("stop").disabled = true;
-    if (msg.error) {
-      el("live-target").textContent = `중지(오류): ${msg.error}`;
-    }
-  }
+// ---- CSI 차트 (진폭/위상) --------------------------------------------------
+function drawCsi(m) {
+  $("m-rate").textContent = m.rate;
+  $("m-rssi").textContent = m.rssi;
+  $("m-sub").textContent = m.n_sub;
+  drawSeries($("amp-canvas"), m.amplitude, "#4aa3ff", true);
+  drawSeries($("phase-canvas"), m.phase, "#f5a623", false, -Math.PI, Math.PI);
 }
 
-// ---- canvas 진폭 막대그래프 ------------------------------------------------
-function drawAmplitude(amp) {
-  const canvas = el("chart");
-  const ctx = canvas.getContext("2d");
-  const W = canvas.width;
-  const H = canvas.height;
+function drawSeries(cv, data, color, autoMax, fixedMin, fixedMax) {
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
   ctx.clearRect(0, 0, W, H);
-  if (!amp.length) return;
+  ctx.fillStyle = "#0f1115"; ctx.fillRect(0, 0, W, H);
+  if (!data || !data.length) return;
 
-  const pad = 24;
-  const plotW = W - pad * 2;
-  const plotH = H - pad * 2;
-  const maxAmp = Math.max(1, ...amp);
-  const barW = plotW / amp.length;
+  let mn = fixedMin !== undefined ? fixedMin : 0;
+  let mx = fixedMax !== undefined ? fixedMax : 1;
+  if (autoMax) { mx = Math.max(1, ...data); mn = 0; }
+  const range = (mx - mn) || 1;
 
-  // 축
+  // 0(또는 중앙) 기준선
   ctx.strokeStyle = "#2a2f3a";
   ctx.beginPath();
-  ctx.moveTo(pad, H - pad);
-  ctx.lineTo(W - pad, H - pad);
+  const zeroY = H - ((0 - mn) / range) * H;
+  ctx.moveTo(0, zeroY); ctx.lineTo(W, zeroY); ctx.stroke();
+
+  // 데이터 라인
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  data.forEach((v, i) => {
+    const x = (i / (data.length - 1)) * W;
+    const y = H - ((v - mn) / range) * H;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
   ctx.stroke();
-
-  // 막대
-  ctx.fillStyle = "#4aa3ff";
-  for (let i = 0; i < amp.length; i++) {
-    const h = (amp[i] / maxAmp) * plotH;
-    ctx.fillRect(pad + i * barW, H - pad - h, Math.max(1, barW - 1), h);
-  }
-
-  // 최대값 라벨
-  ctx.fillStyle = "#8b929e";
-  ctx.font = "11px sans-serif";
-  ctx.fillText(`max |H| ≈ ${maxAmp.toFixed(0)}`, pad, pad - 6);
 }
 
-// ---- 초기화 ----------------------------------------------------------------
-el("refresh").onclick = loadDevices;
-el("stop").onclick = stopMonitor;
-loadDevices();
-setInterval(loadDevices, 3000); // 디바이스 연결 상태 주기 갱신
+// ---- flash 로그 ------------------------------------------------------------
+function appendLog(line) {
+  const el = $("flash-log");
+  el.textContent += line + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+
+// ---- 이벤트 ----------------------------------------------------------------
+$("btn-refresh").onclick = refresh;
+$("btn-log-clear").onclick = () => { $("flash-log").textContent = ""; };
+$("btn-stream").onclick = () => {
+  if (streaming) {
+    send({ action: "stream_stop" });
+    streaming = false; $("btn-stream").textContent = "▶ 스트림 시작";
+  } else {
+    const port = $("rx-select").value;
+    if (!port) { alert("rx 보드를 선택하세요"); return; }
+    streaming = true; $("btn-stream").textContent = "⏸ 중지";
+    send({ action: "stream_start", port });
+  }
+};
+
+connectWs();

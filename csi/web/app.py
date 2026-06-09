@@ -1,77 +1,55 @@
-"""CSI 웹 모니터 백엔드(FastAPI).
+"""CSI 통합 웹 대시보드 백엔드(FastAPI).
 
-두 가지를 브라우저로 보여준다:
-  1) 디바이스 상태판 — config_devices.yaml 의 tx/rx 목록과 연결(포트 해석) 여부.
-  2) CSI 라이브 모니터 — 선택한 rx 보드의 시리얼을 열어 CSI_DATA 라인을 파싱하고
-     패킷 rate / RSSI / 서브캐리어 진폭을 WebSocket 으로 실시간 푸시.
+하나의 화면에서:
+  1) 연결된 보드 실시간 감지 + role(tx/rx) 자동 표시(펌웨어 DEVICE_ROLE)
+  2) 보드별 tx/rx 펌웨어 빌드·다운로드(flash)
+  3) rx 보드의 CSI 진폭/위상 실시간 시각화
 
-실행: scripts/csi_web_monitor.sh (uvicorn 으로 기동)
+config_devices.yaml 의존 없음 — csi/common 의 공용 백엔드(boards/role_detect/
+flasher/csi_stream/port_lock)를 그대로 쓴다. GUI(csi/gui)도 같은 백엔드를 호출한다.
 
-WebSocket(/ws) 메시지 규약:
-  클라 → 서버: {"action": "start", "device": "rx1"}  또는 {"action": "stop"}
+실행: scripts/csi_app.sh
+
+WebSocket(/ws) 규약:
+  클라 → 서버:
+    {"action":"refresh"}                       연결 보드 재감지(+role 비동기)
+    {"action":"flash","role":"rx","port":"..."} 해당 포트에 펌웨어 빌드/flash
+    {"action":"stream_start","port":"..."}      그 rx 포트의 CSI 스트림 시작
+    {"action":"stream_stop"}
   서버 → 클라:
-    {"type": "status", "msg": "..."}
-    {"type": "csi", "rssi": int, "n_sub": int, "rate": float, "amplitude": [float, ...]}
-    {"type": "stopped", "error": str|None}
+    {"type":"boards","boards":[...]}            보드 목록(USB 정보)
+    {"type":"role","port":..,"role":"tx|rx|null","source":..}
+    {"type":"flash_progress","port":..,"line":..}
+    {"type":"flash_done","port":..,"ok":bool,"role":..}
+    {"type":"csi","rssi":..,"n_sub":..,"rate":..,"amplitude":[..],"phase":[..]}
+    {"type":"stream_status","msg":..} / {"type":"stream_stopped","error":..}
 """
 from __future__ import annotations
 
 import asyncio
 import json
-import math
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-try:
-    import serial  # pyserial
-except ImportError:  # pragma: no cover
-    serial = None  # type: ignore[assignment]
+# csi/common 공용 백엔드 import (csi/web → csi/common).
+BASE_DIR = Path(__file__).resolve().parent        # csi/web
+CSI_DIR = BASE_DIR.parent                          # csi
+sys.path.insert(0, str(CSI_DIR / "common"))
 
-# csi/collect, csi/analysis 를 import 경로에 추가(기존 모듈 재사용).
-BASE_DIR = Path(__file__).resolve().parent          # csi/web
-CSI_DIR = BASE_DIR.parent                            # csi
-sys.path.insert(0, str(CSI_DIR / "collect"))
-sys.path.insert(0, str(CSI_DIR / "analysis"))
+import boards as boards_mod   # noqa: E402
+import csi_stream             # noqa: E402
+import flasher                # noqa: E402
+import role_detect            # noqa: E402
+from port_lock import port_lock  # noqa: E402
 
-from csi_parser import parse_line  # noqa: E402
-from device_map import load_devices  # noqa: E402
-
-app = FastAPI(title="ESP32 CSI 모니터")
+app = FastAPI(title="ESP32 CSI 대시보드")
 STATIC_DIR = BASE_DIR / "static"
-
-# csi_recv 펌웨어 콘솔 보드레이트(sdkconfig.defaults 와 일치).
-CSI_BAUD = 921600
-
-
-def _device_list() -> list[dict[str, object]]:
-    """디바이스 상태판용 직렬화 목록."""
-    out: list[dict[str, object]] = []
-    for d in load_devices():
-        out.append(
-            {
-                "name": d.name,
-                "role": d.role,
-                "serial": d.serial,
-                "port": d.port,
-                "connected": d.port is not None,
-                "firmware": d.firmware,
-            }
-        )
-    return out
-
-
-def _resolve_port(device_name: str) -> str | None:
-    for d in load_devices():
-        if d.name == device_name and d.port:
-            return d.port
-    return None
 
 
 @app.get("/")
@@ -79,81 +57,10 @@ async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
-@app.get("/api/devices")
-async def api_devices() -> dict[str, object]:
-    devices = await asyncio.to_thread(_device_list)
-    return {"devices": devices}
-
-
-def _stream_csi(
-    port: str,
-    stop_ev: threading.Event,
-    push: Callable[[dict[str, object]], None],
-) -> str | None:
-    """시리얼에서 CSI_DATA 라인을 읽어 집계 후 push. 오류 메시지(또는 None) 반환."""
-    if serial is None:
-        return "pyserial 미설치"
-    try:
-        ser = serial.Serial(port, CSI_BAUD, timeout=1)
-    except Exception as exc:  # 권한/포트 문제로 서버가 죽지 않게.
-        return f"포트 열기 실패: {exc}"
-
-    push({"type": "status", "msg": f"{port} @ {CSI_BAUD}bps 수신 시작"})
-
-    header: list[str] | None = None
-    window_start = time.monotonic()
-    window_count = 0
-    last_emit = 0.0
-    rate = 0.0
-    try:
-        while not stop_ev.is_set():
-            raw = ser.readline()
-            if not raw:
-                continue
-            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-            if not line:
-                continue
-            if line.startswith("type,"):
-                header = line.split(",")
-                continue
-            pkt = parse_line(line, header)
-            if pkt is None:
-                continue
-
-            window_count += 1
-            now = time.monotonic()
-            elapsed = now - window_start
-            if elapsed >= 1.0:
-                rate = window_count / elapsed
-                window_start = now
-                window_count = 0
-
-            # 진폭은 매 패킷 보내지 않고 ~10Hz 로만(과부하 방지).
-            if now - last_emit >= 0.1:
-                last_emit = now
-                amp = _amplitudes(pkt.raw_csi)
-                push(
-                    {
-                        "type": "csi",
-                        "rssi": pkt.rssi,
-                        "n_sub": len(amp),
-                        "rate": round(rate, 1),
-                        "amplitude": amp,
-                    }
-                )
-    finally:
-        ser.close()
-    return None
-
-
-def _amplitudes(raw_csi: list[int]) -> list[float]:
-    """(i, q) 쌍 배열 → 서브캐리어별 진폭. numpy 없이 계산(서버 의존 최소화)."""
-    amp: list[float] = []
-    for k in range(0, len(raw_csi) - 1, 2):
-        i = raw_csi[k]
-        q = raw_csi[k + 1]
-        amp.append(round(math.hypot(i, q), 2))
-    return amp
+@app.get("/api/boards")
+async def api_boards() -> dict[str, object]:
+    found = await asyncio.to_thread(boards_mod.discover)
+    return {"boards": [b.to_dict() for b in found]}
 
 
 @app.websocket("/ws")
@@ -161,8 +68,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     loop = asyncio.get_running_loop()
     out_q: asyncio.Queue = asyncio.Queue()
-    stop_ev = threading.Event()
-    worker: threading.Thread | None = None
+    stream_stop = threading.Event()
 
     def push(obj: dict[str, object]) -> None:
         loop.call_soon_threadsafe(out_q.put_nowait, obj)
@@ -174,19 +80,62 @@ async def ws_endpoint(websocket: WebSocket) -> None:
 
     sender_task = asyncio.create_task(sender())
 
-    def start_stream(device_name: str) -> None:
-        port = _resolve_port(device_name)
-        if port is None:
-            push({"type": "status", "msg": f"'{device_name}' 미연결 — 포트를 찾지 못함"})
-            return
+    def detect_role_bg(port: str) -> None:
+        """포트 role 을 백그라운드로 감지해 push(포트 점유 직렬화)."""
+        with port_lock(port):
+            role, src = role_detect.detect_role(port, timeout=4.0)
+        push({"type": "role", "port": port, "role": role, "source": src})
+
+    def do_refresh() -> None:
+        found = boards_mod.discover()
+        push({"type": "boards", "boards": [b.to_dict() for b in found]})
+        for b in found:
+            threading.Thread(target=detect_role_bg, args=(b.port,), daemon=True).start()
+
+    def do_flash(role: str, port: str) -> None:
+        def run() -> None:
+            ok = False
+            with port_lock(port):
+                push({"type": "flash_progress", "port": port, "line": f"[flash] role={role} 시작"})
+                # 빌드 산출물이 없으면 빌드부터(최초 1회, 수 분).
+                if not flasher.is_built(role):
+                    push({"type": "flash_progress", "port": port,
+                          "line": "[build] 펌웨어 빌드(최초, 수 분 소요)..."})
+                    rc = flasher.build(
+                        role,
+                        on_line=lambda l: push({"type": "flash_progress", "port": port, "line": l}),
+                    )
+                    if rc != 0:
+                        push({"type": "flash_done", "port": port, "ok": False, "msg": "빌드 실패"})
+                        return
+                rc = flasher.flash(
+                    role, port,
+                    on_line=lambda l: push({"type": "flash_progress", "port": port, "line": l}),
+                )
+                ok = rc == 0
+                push({"type": "flash_done", "port": port, "ok": ok, "role": role})
+            # flash 성공 시 부팅 후 role 재감지.
+            if ok:
+                time.sleep(3)
+                detect_role_bg(port)
+        threading.Thread(target=run, daemon=True).start()
+
+    def do_stream_start(port: str) -> None:
+        nonlocal stream_stop
+        stream_stop.set()  # 이전 스트림 정지
+        stream_stop = threading.Event()
+        ev = stream_stop
 
         def run() -> None:
-            err = _stream_csi(port, stop_ev, push)
-            push({"type": "stopped", "error": err})
+            with port_lock(port):
+                if ev.is_set():
+                    push({"type": "stream_stopped", "error": None})
+                    return
+                push({"type": "stream_status", "msg": f"{port} CSI 수신 시작"})
+                err = csi_stream.stream_csi(port, ev, lambda d: push(d))
+            push({"type": "stream_stopped", "error": err})
 
-        nonlocal worker
-        worker = threading.Thread(target=run, daemon=True)
-        worker.start()
+        threading.Thread(target=run, daemon=True).start()
 
     try:
         while True:
@@ -196,18 +145,18 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             except Exception:
                 continue
             action = msg.get("action")
-            if action == "start":
-                if worker and worker.is_alive():
-                    stop_ev.set()
-                    worker.join(timeout=2)
-                stop_ev = threading.Event()
-                start_stream(str(msg.get("device")))
-            elif action == "stop":
-                stop_ev.set()
+            if action == "refresh":
+                threading.Thread(target=do_refresh, daemon=True).start()
+            elif action == "flash":
+                do_flash(str(msg.get("role")), str(msg.get("port")))
+            elif action == "stream_start":
+                do_stream_start(str(msg.get("port")))
+            elif action == "stream_stop":
+                stream_stop.set()
     except WebSocketDisconnect:
         pass
     finally:
-        stop_ev.set()
+        stream_stop.set()
         sender_task.cancel()
 
 

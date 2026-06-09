@@ -206,6 +206,10 @@ static void wifi_csi_rx_cb(void *ctx, wifi_csi_info_t *info)
     }
 #endif
     ets_printf("]\"\n");
+    /* 호스트의 role 자동 감지를 위해 주기적으로도 출력(부팅 직후 1회는 app_main 에서). */
+    if (s_count % 500 == 0) {
+        ets_printf("DEVICE_ROLE {\"role\":\"rx\",\"fw\":\"csi_recv\",\"ver\":1}\n");
+    }
     s_count++;
 }
 
@@ -294,4 +298,8 @@ void app_main()
     wifi_esp_now_init(peer);
 
     wifi_csi_init();
+
+    /* 호스트(웹/GUI)가 보드 role 을 자동 감지하도록 출력(부팅 시 1회). 이후로는
+     * CSI_DATA 스트림이나 콜백의 주기적 재출력으로도 rx 로 감지/추정 가능하다. */
+    ets_printf("DEVICE_ROLE {\"role\":\"rx\",\"fw\":\"csi_recv\",\"ver\":1}\n");
 }

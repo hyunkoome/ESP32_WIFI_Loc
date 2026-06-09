@@ -10,11 +10,10 @@ csi_recv 펌웨어는 USB-Serial 로 아래 형식의 CSV 라인을 내보낸다
 이 스크립트는 포트에서 라인을 읽어 그대로 .csv 로 저장하는 **얇은 수집기**다.
 파싱/전처리는 `csi/analysis/` 단계에서 한다(수집 단계는 손실 없이 raw 보존이 목표).
 
-포트 지정 방법은 두 가지다:
-  1) --port 로 직접:        --port /dev/ttyACM0
-  2) --role/--device 로 by-id 자동 해석(config_devices.yaml 기반, ttyACM 번호 무관):
-        --role rx           # rx 역할 보드(하나일 때)
-        --device rx1        # name 으로 특정 보드 지정
+포트 지정:
+  1) --port 로 직접:   --port /dev/ttyACM0
+  2) --role 로 자동:   --role rx
+        (연결 보드를 실시간 감지해 펌웨어 DEVICE_ROLE 로 role 을 판별 — config_devices.yaml 불필요)
 
 사용 예:
     python serial_collector.py --role rx --out ../../results/csi_run01.csv
@@ -34,12 +33,17 @@ try:
 except ImportError:  # pragma: no cover - 의존성 미설치 폴백
     serial = None  # type: ignore[assignment]
 
-# 같은 디렉터리의 by-id 디바이스 매핑 헬퍼. 스크립트로 직접 실행될 때를 위해
-# 폴백 import 한다(패키지 컨텍스트가 아닐 수 있음).
+# role 로 포트를 찾을 때 csi/common 의 보드/role 감지를 쓴다(config_devices.yaml
+# 의존 제거 — 연결 보드를 실시간 감지해 펌웨어 DEVICE_ROLE 로 role 을 판별).
+_COMMON = Path(__file__).resolve().parent.parent / "common"
+if str(_COMMON) not in sys.path:
+    sys.path.insert(0, str(_COMMON))
 try:
-    from device_map import load_devices
+    import boards as _boards  # type: ignore
+    import role_detect as _role_detect  # type: ignore
 except ImportError:  # pragma: no cover
-    load_devices = None  # type: ignore[assignment]
+    _boards = None  # type: ignore[assignment]
+    _role_detect = None  # type: ignore[assignment]
 
 # csi_recv/sdkconfig.defaults 의 CONFIG_ESP_CONSOLE_UART_BAUDRATE 와 일치해야 한다.
 DEFAULT_BAUDRATE = 921600
@@ -115,38 +119,37 @@ def collect(
 
 
 def resolve_port(args: argparse.Namespace) -> str:
-    """--port / --role / --device 중 하나로 실제 시리얼 포트를 정한다."""
+    """--port 직접 지정, 또는 --role 로 연결 보드를 실시간 감지해 포트를 정한다."""
     if args.port:
         return args.port
-    if load_devices is None:
-        sys.exit("device_map 을 불러올 수 없습니다. --port 로 직접 지정하세요.")
-
-    devices = [d for d in load_devices() if d.port]
-    if args.device:
-        match = [d for d in devices if d.name == args.device]
-        if not match:
-            sys.exit(f"name='{args.device}' 인 연결된 디바이스를 찾지 못했습니다.")
-        return match[0].port  # type: ignore[return-value]
     if args.role:
-        match = [d for d in devices if d.role == args.role]
-        if not match:
-            sys.exit(f"role='{args.role}' 인 연결된 디바이스가 없습니다.")
-        if len(match) > 1:
-            names = ", ".join(d.name for d in match)
+        if _boards is None or _role_detect is None:
+            sys.exit("csi/common 을 불러올 수 없습니다. --port 로 직접 지정하세요.")
+        cands: list[str] = []
+        for b in _boards.discover():
+            role, _src = _role_detect.detect_role(b.port)
+            if role == args.role:
+                cands.append(b.port)
+        if not cands:
             sys.exit(
-                f"role='{args.role}' 디바이스가 여러 개입니다({names}). "
-                f"--device <name> 으로 지정하세요."
+                f"role='{args.role}' 인 연결된 보드를 찾지 못했습니다"
+                f"(펌웨어 DEVICE_ROLE 출력을 확인하세요)."
             )
-        return match[0].port  # type: ignore[return-value]
-    sys.exit("--port, --role, --device 중 하나는 지정해야 합니다.")
+        if len(cands) > 1:
+            sys.exit(
+                f"role='{args.role}' 보드가 여러 개입니다({', '.join(cands)}). "
+                f"--port 로 직접 지정하세요."
+            )
+        return cands[0]
+    sys.exit("--port 또는 --role 중 하나는 지정해야 합니다.")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="ESP32-S3 CSI 시리얼 수집기")
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--port", help="시리얼 포트 직접 지정 (예: /dev/ttyACM0)")
-    src.add_argument("--role", choices=["tx", "rx"], help="config_devices.yaml 의 role 로 보드 선택")
-    src.add_argument("--device", help="config_devices.yaml 의 name 으로 보드 선택")
+    src.add_argument("--role", choices=["tx", "rx"],
+                     help="연결 보드를 실시간 감지해 role(tx/rx) 로 선택")
     p.add_argument("--baud", type=int, default=DEFAULT_BAUDRATE, help="보드레이트")
     p.add_argument(
         "--out",

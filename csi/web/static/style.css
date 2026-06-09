@@ -7,7 +7,7 @@
   --ok: #2ecc71;
   --off: #5a6472;
   --accent: #4aa3ff;
-  --tx: #f5a623;
+  --tx: #9b6dff;
   --rx: #4aa3ff;
 }
 
@@ -18,18 +18,26 @@ body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--text);
-  padding: 24px;
+  padding: 0 0 40px;
 }
 
-header h1 { margin: 0 0 4px; font-size: 20px; }
-header .sub { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 24px; border-bottom: 1px solid var(--line);
+}
+header h1 { margin: 0; font-size: 19px; }
 
-section { margin-bottom: 28px; }
-h2 { font-size: 15px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+section { margin: 22px 24px; }
+h2 {
+  font-size: 15px; border-bottom: 1px solid var(--line);
+  padding-bottom: 8px; display: flex; align-items: center; gap: 10px;
+}
+.muted { color: var(--muted); font-weight: 400; font-size: 12px; }
+h2 .btn-mini { margin-left: auto; }
 
 .device-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 12px;
 }
 
@@ -40,35 +48,45 @@ h2 { font-size: 15px; border-bottom: 1px solid var(--line); padding-bottom: 8px;
   padding: 14px;
 }
 .card .row { display: flex; justify-content: space-between; align-items: center; }
-.card .name { font-weight: 600; }
-.badge {
-  font-size: 11px; padding: 2px 8px; border-radius: 10px; color: #0b0d10;
-}
-.badge.tx { background: var(--tx); }
-.badge.rx { background: var(--rx); }
+.card .name { font-weight: 600; font-family: ui-monospace, monospace; }
+.badge { font-size: 11px; padding: 2px 9px; border-radius: 10px; font-weight: 700; }
+.badge.tx { background: var(--tx); color: #fff; }
+.badge.rx { background: var(--rx); color: #06101c; }
+.badge.unknown, .badge.detecting { background: #30363d; color: var(--muted); }
 .card .meta { color: var(--muted); font-size: 12px; margin-top: 6px; word-break: break-all; }
-.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
-.dot.on { background: var(--ok); }
-.dot.off { background: var(--off); }
+.card .meta.byid { font-size: 10px; color: #586069; font-family: ui-monospace, monospace; }
+.warn { color: #e3b341; }
+.actions { display: flex; gap: 8px; margin-top: 12px; }
+.actions .btn-mini { flex: 1; }
 
 .btn-mini {
   background: var(--accent); color: #06101c; border: 0; border-radius: 6px;
-  padding: 5px 10px; font-size: 12px; cursor: pointer; font-weight: 600;
+  padding: 6px 11px; font-size: 12px; cursor: pointer; font-weight: 600;
 }
-.btn-mini:disabled { background: #39424f; color: var(--muted); cursor: default; }
-.card .btn-mini { margin-top: 10px; width: 100%; }
+.btn-mini:hover { filter: brightness(1.1); }
+.btn-mini.tx { background: var(--tx); color: #fff; }
+.btn-mini.rx { background: var(--rx); color: #06101c; }
 
-.live-bar { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.live-bar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
 .metric { color: var(--muted); font-size: 13px; }
 .metric b { color: var(--text); }
-#live-target { font-weight: 600; }
-
-canvas {
-  width: 100%; height: 280px; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 8px;
+select {
+  background: #21262d; color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; font-size: 13px;
 }
-.hint { color: var(--muted); font-size: 12px; }
 
-footer { border-top: 1px solid var(--line); padding-top: 10px; font-size: 12px; }
-.ws-on { color: var(--ok); }
-.ws-off { color: var(--off); }
+.chart-label { font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+canvas {
+  width: 100%; height: auto; display: block;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+}
+.hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+
+#flash-log {
+  background: #0b0d10; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; max-height: 260px; overflow: auto;
+  font-size: 12px; font-family: ui-monospace, monospace; white-space: pre-wrap; color: #c9d1d9;
+}
+
+.ws-on { color: var(--ok); font-size: 12px; }
+.ws-off { color: var(--off); font-size: 12px; }

@@ -3,36 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ESP32 CSI 모니터</title>
+  <title>ESP32 CSI 대시보드</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header>
-    <h1>ESP32 CSI 모니터</h1>
-    <p class="sub">esp32_device.yaml 의 tx/rx 보드 상태와 CSI 실시간 수신을 모니터링합니다.</p>
+    <h1>📡 ESP32 CSI 대시보드</h1>
+    <span id="ws-status" class="ws-off">WebSocket: 미연결</span>
   </header>
 
+  <!-- 보드 실시간 감지 + tx/rx 다운로드 -->
   <section>
-    <h2>디바이스 상태 <button id="refresh" class="btn-mini">새로고침</button></h2>
-    <div id="devices" class="device-grid"></div>
+    <h2>연결된 보드 <span class="muted">· 실시간 감지 · role 자동표시</span>
+      <button id="btn-refresh" class="btn-mini">🔄 새로고침</button>
+    </h2>
+    <div id="board-list" class="device-grid">탐색 중…</div>
   </section>
 
+  <!-- CSI 라이브 시각화 -->
   <section>
-    <h2>CSI 라이브</h2>
+    <h2>CSI 라이브 (진폭 / 위상)</h2>
     <div class="live-bar">
-      <span id="live-target">선택된 rx 없음</span>
+      <select id="rx-select" title="CSI 를 받을 rx 보드"></select>
+      <button id="btn-stream" class="btn-mini">▶ 스트림 시작</button>
       <span class="metric">rate: <b id="m-rate">0</b> pkt/s</span>
       <span class="metric">RSSI: <b id="m-rssi">-</b> dBm</span>
       <span class="metric">subcarriers: <b id="m-sub">-</b></span>
-      <button id="stop" class="btn-mini" disabled>정지</button>
     </div>
-    <canvas id="chart" width="900" height="280"></canvas>
-    <p class="hint">막대는 서브캐리어별 진폭(|H|)입니다. rx 카드의 “모니터 시작”을 누르세요.</p>
+    <div class="chart-label">진폭 |H|</div>
+    <canvas id="amp-canvas" width="900" height="200"></canvas>
+    <div class="chart-label">위상 ∠H (−π ~ π rad)</div>
+    <canvas id="phase-canvas" width="900" height="200"></canvas>
+    <p class="hint">tx→rx CSI 의 서브캐리어별 진폭/위상입니다. 사람이 tx–rx 사이를 지나가면 파형이 변합니다.</p>
   </section>
 
-  <footer>
-    <span id="ws-state" class="ws-off">WebSocket: 미연결</span>
-  </footer>
+  <!-- flash 진행 로그 -->
+  <section id="log-panel" hidden>
+    <h2>flash 진행 <button id="btn-log-clear" class="btn-mini">지우기</button></h2>
+    <pre id="flash-log"></pre>
+  </section>
 
   <script src="/static/app.js"></script>
 </body>
