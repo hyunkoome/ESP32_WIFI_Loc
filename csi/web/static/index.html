@@ -3,45 +3,94 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ESP32 CSI 대시보드</title>
+  <title>ESP32 CSI Dashboard</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header>
-    <h1>📡 ESP32 CSI 대시보드</h1>
-    <span id="ws-status" class="ws-off">WebSocket: 미연결</span>
+    <h1>📡 ESP32 CSI Dashboard</h1>
+    <span id="mode-badge" class="mode-idle">⏸ Idle</span>
+    <span id="ws-status" class="ws-off">WebSocket: off</span>
   </header>
 
-  <!-- 보드 실시간 감지 + tx/rx 다운로드 -->
+  <!-- 연결된 보드 실시간 감지 + tx/rx flash -->
   <section>
-    <h2>연결된 보드 <span class="muted">· 실시간 감지 · role 자동표시</span>
-      <button id="btn-refresh" class="btn-mini">🔄 새로고침</button>
+    <h2>Connected boards <span class="muted">· live detection · auto role · card per rx</span>
+      <button id="btn-refresh" class="btn-mini">🔄 Refresh</button>
     </h2>
-    <div id="board-list" class="device-grid">탐색 중…</div>
+    <div id="board-list" class="device-grid">Detecting…</div>
   </section>
 
-  <!-- CSI 라이브 시각화 -->
+  <!-- Wi-Fi 자격증명(라우터 신호원용) — GUI 의 read_wifi_config 대체(브라우저 입력) -->
   <section>
-    <h2>CSI 라이브 (진폭 / 위상)</h2>
+    <h2>Wi-Fi router <span class="muted">· credentials for the 'wifi router' source (2.4GHz)</span></h2>
     <div class="live-bar">
-      <select id="rx-select" title="CSI 를 받을 rx 보드"></select>
-      <button id="btn-stream" class="btn-mini">▶ 스트림 시작</button>
-      <span class="metric">rate: <b id="m-rate">0</b> pkt/s</span>
-      <span class="metric">RSSI: <b id="m-rssi">-</b> dBm</span>
-      <span class="metric">subcarriers: <b id="m-sub">-</b></span>
+      <input id="wifi-ssid" type="text" placeholder="Router SSID" />
+      <input id="wifi-pw" type="password" placeholder="Password" />
+      <button id="btn-wifi" class="btn-mini">Apply</button>
+      <span class="hint">First rx auto-connects to the router. Others use tx (ESP-NOW).</span>
     </div>
-    <div class="chart-label">진폭 |H|</div>
-    <canvas id="amp-canvas" width="900" height="200"></canvas>
-    <div class="chart-label">위상 ∠H (−π ~ π rad)</div>
-    <canvas id="phase-canvas" width="900" height="200"></canvas>
-    <p class="hint">tx→rx CSI 의 서브캐리어별 진폭/위상입니다. 사람이 tx–rx 사이를 지나가면 파형이 변합니다.</p>
   </section>
 
-  <!-- flash 진행 로그 -->
-  <section id="log-panel" hidden>
-    <h2>flash 진행 <button id="btn-log-clear" class="btn-mini">지우기</button></h2>
+  <!-- 공용 분류기 패널: 모든 rx 동시 로깅/학습 -->
+  <section>
+    <h2>Classifier <span class="muted">· logs/trains all rx at once</span></h2>
+    <div class="live-bar">
+      <button id="log-empty" class="btn-log" data-mode="empty">Log Empty</button>
+      <button id="log-presence" class="btn-log" data-mode="presence">Log Presence</button>
+      <button id="log-motion" class="btn-log" data-mode="motion">Log Motion</button>
+      <button id="btn-train" class="btn-mini">Train Classifier</button>
+    </div>
+    <p class="hint">Click a Log button to start recording (all rx), click again to save.
+      Then Train Classifier to compute std/doppler thresholds → config/motion_detection.yaml.</p>
+  </section>
+
+  <!-- Space Monitoring: rx 별 3상태 + voting 최종 방 상태 + 이벤트 로그 -->
+  <section>
+    <h2>Space Monitoring <span class="muted">· per-rx state + room voting</span></h2>
+    <div id="room-state" class="room empty">ROOM: ⚪ Empty</div>
+    <div id="rx-state-row" class="state-row"></div>
+    <div class="chart-label">Motion event log (time · rx · doppler):</div>
+    <pre id="event-log"></pre>
+    <div id="motion-count" class="muted">Motion in last 1 min: 0</div>
+  </section>
+
+  <!-- rx 별 차트 카드(동적 생성) -->
+  <section>
+    <h2>RX live charts <span class="muted">· amplitude / phase / waterfall / doppler</span></h2>
+    <div id="rx-cards"></div>
+    <p id="no-rx" class="hint">No rx detected yet. Flash an rx board, then it appears here.</p>
+  </section>
+
+  <!-- flash 진행 + 일반 로그 -->
+  <section id="log-panel">
+    <h2>Log <button id="btn-log-clear" class="btn-mini">Clear</button></h2>
     <pre id="flash-log"></pre>
   </section>
+
+  <!-- rx 카드 템플릿 -->
+  <template id="rx-card-tpl">
+    <div class="rx-card">
+      <div class="rx-head">
+        <span class="rx-title"></span>
+        <select class="rx-source">
+          <option value="tx">tx</option>
+          <option value="router">wifi router</option>
+          <option value="all">all (fusion)</option>
+        </select>
+        <span class="rx-stats muted">rate: -</span>
+        <span class="rx-state">State: not trained</span>
+      </div>
+      <div class="chart-label">Amplitude |H| — per-subcarrier channel gain</div>
+      <canvas class="amp" width="900" height="150"></canvas>
+      <div class="chart-label">Phase ∠H — per-subcarrier phase (−π ~ π)</div>
+      <canvas class="phase" width="900" height="150"></canvas>
+      <div class="chart-label">Waterfall — subcarrier amplitude over time (top=recent)</div>
+      <canvas class="waterfall" width="900" height="150"></canvas>
+      <div class="chart-label">Doppler spectrum — motion frequency (0.3 ~ 10 Hz)</div>
+      <canvas class="doppler" width="900" height="150"></canvas>
+    </div>
+  </template>
 
   <script src="/static/app.js"></script>
 </body>

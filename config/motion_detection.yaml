@@ -1,18 +1,46 @@
-# 모션 인지(정적/동적 분류) 설정 — CSI GUI 가 런타임에 로드한다.
-# 하이퍼파라미터는 사람이 조정, classifiers 는 GUI 의 'Train Classifier' 가 자동 갱신한다.
 motion_detection:
-  # --- 공통 하이퍼파라미터 ---
-  move_window: 20     # 변동지표 계산 윈도우(최근 N 프레임, ~2초 @10Hz)
-  ema_alpha: 0.3      # 변동지표 EMA 계수(0~1). 작을수록 부드럽고 느림, 클수록 민감/빠름
-  outlier_n: 5        # 연속 N회 같은 결과여야 상태 확정(순간 튐 완화)
-  hysteresis: 0.15    # 히스테리시스 마진 = 임계 × 이 비율. 경계 진동 방지
-
-  # --- 3상태 판정 디폴트 임계 (실측 검증 기반, rx 별 Train 전까지 사용) ---
-  # presence = std(진폭의 시간 표준편차), motion = doppler(도플러 피크).
-  # 판정: doppler > doppler_th → Motion / elif std > std_th → Presence / else Empty.
-  default_std_th: 0.90       # presence 임계 — std 가 이보다 크면 사람 있음
-  default_doppler_th: 75.0   # motion 임계 — doppler 가 이보다 크면 움직임
-
-  # --- rx 별 학습 결과 (Train 시 자동 갱신, serial 키) ---
-  # 각 항목: std_th, doppler_th(판정 임계) + empty/presence/motion 통계(std/doppler 평균·최대).
-  classifiers: {}
+  move_window: 20
+  ema_alpha: 0.3
+  outlier_n: 5
+  hysteresis: 0.15
+  default_std_th: 0.9
+  default_doppler_th: 75.0
+  classifiers:
+    5B5E078007:
+      source: tx
+      std_th: 0.9772851087372108
+      doppler_th: 11.17815370784355
+      empty:
+        std_mean: 1.1684378366981985
+        std_max: 3.845607342943447
+        doppler_mean: 17.91468851311233
+        doppler_max: 87.8679098311829
+      presence:
+        std_mean: 0.786132380776223
+        std_max: 0.8661582072018539
+        doppler_mean: 9.338357606932199
+        doppler_max: 13.284822964359417
+      motion:
+        std_mean: 0.8582510056088989
+        std_max: 0.9023957932049951
+        doppler_mean: 13.0179498087549
+        doppler_max: 16.446065202147864
+    5C4C092284:
+      source: router
+      std_th: 3.2356944971733017
+      doppler_th: 31.24901948930374
+      empty:
+        std_mean: 4.54440419441302
+        std_max: 4.876512488263562
+        doppler_mean: 142.47515143227483
+        doppler_max: 178.1545981037856
+      presence:
+        std_mean: 1.9269847999335834
+        std_max: 3.0814667351862077
+        doppler_mean: 31.798436364107776
+        doppler_max: 56.21320969431952
+      motion:
+        std_mean: 2.1095640835623777
+        std_max: 2.5945636119721938
+        doppler_mean: 30.69960261449971
+        doppler_max: 43.39283528200508

@@ -90,3 +90,69 @@ canvas {
 
 .ws-on { color: var(--ok); font-size: 12px; }
 .ws-off { color: var(--off); font-size: 12px; }
+
+/* 모드 배지(Idle / Logging / Detecting) — 헤더 우측 */
+header #mode-badge { margin-left: auto; font-size: 13px; font-weight: 700; }
+.mode-idle { color: var(--muted); }
+.mode-logging { color: #f5a623; }
+.mode-detecting { color: var(--ok); }
+header #ws-status { margin-left: 0; }
+
+/* Wi-Fi / 입력 */
+input[type="text"], input[type="password"] {
+  background: #21262d; color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; font-size: 13px; min-width: 150px;
+}
+
+/* 공용 로깅 버튼 */
+.btn-log {
+  background: #30363d; color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer; font-weight: 600;
+}
+.btn-log:hover:not(:disabled) { filter: brightness(1.2); }
+.btn-log:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-log.active { background: #f5a623; color: #1a1d24; }
+
+/* Space Monitoring */
+.room {
+  font-size: 26px; font-weight: 800; padding: 14px 18px; border-radius: 10px;
+  margin: 10px 0; border: 1px solid var(--line); background: var(--panel);
+}
+.room.empty { color: #888888; }
+.room.presence { color: var(--accent); }
+.room.motion { color: var(--ok); }
+.state-row { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0; }
+.rx-pill { font-size: 15px; font-weight: 700; }
+#event-log {
+  background: #0b0d10; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; max-height: 120px; overflow: auto; font-size: 12px;
+  font-family: ui-monospace, monospace; white-space: pre-wrap; color: #c9d1d9; margin: 4px 0;
+}
+#motion-count { font-weight: 700; font-size: 13px; }
+
+/* rx 차트 카드 */
+.rx-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px; margin-bottom: 16px;
+}
+.rx-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 8px; }
+.rx-title { font-weight: 700; font-family: ui-monospace, monospace; }
+.rx-source { min-width: 130px; }
+.rx-stats { font-size: 12px; }
+.rx-state { font-weight: 700; font-size: 13px; margin-left: auto; }
+
+#log-panel #flash-log {
+  background: #0b0d10; border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px; max-height: 200px; overflow: auto; font-size: 12px;
+  font-family: ui-monospace, monospace; white-space: pre-wrap; color: #c9d1d9;
+}
+
+/* 모바일 반응형(과하지 않게): 좁은 화면에서 여백/폰트 축소 */
+@media (max-width: 640px) {
+  section { margin: 16px 12px; }
+  header { padding: 12px 14px; flex-wrap: wrap; gap: 8px; }
+  header h1 { font-size: 16px; }
+  .device-grid { grid-template-columns: 1fr; }
+  .room { font-size: 20px; }
+  .rx-state { margin-left: 0; }
+}
