@@ -177,9 +177,7 @@ class SpaceMonitor(QtWidgets.QWidget):
         self._ensure(serial)
         ts, ss = self._series[serial]
         now = time.monotonic() - self._t0
-        ts.append(now); ss.append(level)
-        while len(ts) > 2 and ts[0] < now - 120:   # 최근 120초만 보관
-            ts.pop(0); ss.pop(0)
+        ts.append(now); ss.append(level)   # 전체 보관(컷 없음)
         self._redraw(serial)
 
     def _vote(self) -> None:
@@ -218,7 +216,7 @@ class SpaceMonitor(QtWidgets.QWidget):
             xs.append(ts[i]); ys.append(ss[i] + off)           # 변화(수직)
         xs.append(now); ys.append(ss[-1] + off)                # 현재까지 연장
         self._curves[serial].setData(xs, ys)
-        self.plot.setXRange(max(0.0, now - 60), now, padding=0)
+        self.plot.setXRange(0, max(now, 1.0), padding=0)   # 전체 구간 표시
 
     def _redraw_all(self) -> None:
         for serial in list(self._series):
@@ -422,16 +420,35 @@ class RxTab(QtWidgets.QWidget):
         self.lbl_state.setStyleSheet("color:#888;")
         return 1
 
+    def _load_recent(self, mode: str) -> list:
+        """dataset/csi_logs 에서 (mode, serial)의 '가장 최근' CSV 를 로드해 [(wander, jitter)]."""
+        d = Path(__file__).resolve().parents[2] / "dataset" / "csi_logs"
+        files = sorted(d.glob(f"log_{mode}_{self.serial}_*.csv"))   # 파일명 timestamp 순
+        if not files:
+            return []
+        rows = []
+        try:
+            with open(files[-1], newline="", encoding="utf-8") as f:
+                rd = csv.reader(f)
+                next(rd, None)  # 헤더
+                for row in rd:
+                    try:
+                        rows.append((float(row[6]), float(row[7])))  # wander, jitter 컬럼
+                    except (IndexError, ValueError):
+                        pass
+        except Exception:
+            return []
+        return rows
+
     def train(self) -> bool:
-        """로깅한 Empty/Presence/Motion 데이터로 wander_th/jitter_th 학습 + yaml 갱신.
-        - wander_th(presence 경계) = Empty 와 Presence 의 중간
-        - jitter_th(motion 경계)   = Presence(없으면 Empty) 와 Motion 의 중간
-        Presence 로깅이 없으면 Empty/Motion 만으로 추정한다."""
-        e = self._log_bufs["empty"]
-        p = self._log_bufs["presence"]
-        m = self._log_bufs["motion"]
+        """학습: dataset/csi_logs 의 각 상태별 '가장 최근' CSV 로드(없으면 세션 버퍼).
+        wander_th=(Empty,Presence 중간), jitter_th=(Presence,Motion 중간). yaml 갱신.
+        Presence 가 없으면 Empty/Motion 으로 추정."""
+        e = self._load_recent("empty") or self._log_bufs["empty"]
+        p = self._load_recent("presence") or self._log_bufs["presence"]
+        m = self._load_recent("motion") or self._log_bufs["motion"]
         if not e or not m:
-            self.bridge.log.emit(f"[{self.serial[-4:]}] Cannot train: need at least Empty + Motion logging")
+            self.bridge.log.emit(f"[{self.serial[-4:]}] Cannot train: need Empty + Motion (CSV or session log)")
             return False
         mean = lambda xs: sum(xs) / len(xs)
         ew = [w for w, _ in e]; ej = [j for _, j in e]
