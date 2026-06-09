@@ -7,16 +7,25 @@ WiFi **CSI**(Channel State Information)를 ESP32-S3 로 수집하는 계층입�
 > 추정의 **응용 계층**은 [`../sensing/`](../sensing/) 에 있습니다.
 > (목표: 카메라·기타 센서 없이 WiFi CSI 만으로 실내 다중 인원 감지 + 자세/위치 추정.)
 
-송수신은 **ESP-NOW 기반**이라 라우터/AP 가 필요 없습니다(전용 tx↔rx 페어). 보드는
-펌웨어가 부팅 시 출력하는 **`DEVICE_ROLE` 로 tx/rx 를 자동 감지**하므로, 디바이스
-매핑 파일(config_devices.yaml)이 필요 없습니다 — **연결만 하면** 호스트가 알아봅니다.
+rx 의 `csi_recv` 는 **통합 수신 펌웨어**로, 한 펌웨어가 두 신호원의 CSI 를 모두
+수집합니다 — **tx 의 ESP-NOW broadcast CSI**(라우터 불필요, 전용 tx↔rx 페어)와
+**라우터(AP)의 CSI**(STA 접속 후 게이트웨이 ping). 호스트(GUI/web)가 신호원
+(`tx` / `wifi router` / `all`)을 골라 분석하므로 신호원을 바꿔도 **재flash 가
+필요 없습니다**. 보드는 펌웨어가 부팅 시 출력하는 **`DEVICE_ROLE` 로 tx/rx 를 자동
+감지**하므로, 디바이스 매핑 파일(config_devices.yaml)이 필요 없습니다 — **연결만
+하면** 호스트가 알아봅니다.
+
+라우터 CSI 를 쓸 때 라우터 자격증명은 **펌웨어에 박지 않고 런타임 시리얼 주입**합니다.
+호스트가 `config/wifi_config.yaml`(없으면 사용자 입력)을 읽어 `WIFI_CONNECT <ssid>\t<pw>`
+명령을 rx 로 보내면, rx 가 라우터에 STA 접속 + 게이트웨이 ping 으로 라우터 CSI 를
+수집합니다. `WIFI_DISCONNECT` 로 tx(ESP-NOW 채널)로 복귀합니다.
 
 ## 구조
 
 ```
 csi/
 ├── firmware/
-│   ├── csi_recv/   # 수신 펌웨어(ESP-NOW CSI 수신) — rx. 부팅 시 DEVICE_ROLE 출력
+│   ├── csi_recv/   # 통합 수신 펌웨어 — rx. tx(ESP-NOW) + 라우터(AP) CSI 둘 다 수집. 부팅 시 DEVICE_ROLE 출력
 │   └── csi_send/   # 송신 펌웨어(ESP-NOW 패킷 송신) — tx. 부팅 시 DEVICE_ROLE 출력
 ├── common/         # web/GUI 공용 백엔드(UI 프레임워크 무관)
 │   ├── boards.py        # 보드 실시간 감지(by-id) — board_check usb_detector 재사용
@@ -43,8 +52,10 @@ bash scripts/csi_gui.sh
 ```
 
 대시보드에서 각 보드에 **tx 또는 rx 펌웨어를 골라 다운로드**하고, rx 를 선택해 **CSI
-진폭/위상 파형**을 실시간으로 봅니다. 사람이 **tx–rx 사이(2~5m 권장)** 를 지나가면
-파형이 변합니다(붙여 두면 감지 영역이 없어 변화가 안 보입니다).
+진폭/위상·워터폴·도플러 스펙트럼**을 실시간으로 봅니다. **신호원 콤보(tx / wifi router /
+all)** 로 분석 대상을 고르며, `wifi router` 선택 시 `config/wifi_config.yaml`(없으면
+직접 입력)의 자격증명을 rx 에 주입해 라우터 CSI 를 수집합니다. 사람이 **tx–rx 사이
+(2~5m 권장)** 를 지나가면 파형이 변합니다(붙여 두면 감지 영역이 없어 변화가 안 보입니다).
 
 ## 명령줄 도구
 

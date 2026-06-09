@@ -115,7 +115,7 @@ def evaluate_wifi(
 def evaluate_wifi_connect(
     firmware_diag: Optional[Dict[str, object]],
 ) -> Dict[str, object]:
-    """펌웨어의 WiFi 접속 테스트 결과(cli_wifi_config.yaml AP 로 실제 연결)를 해석.
+    """펌웨어의 WiFi 접속 테스트 결과(config/wifi_config.yaml AP 로 실제 연결)를 해석.
 
     - 자격증명 미설정(attempted=false) → SKIP
     - 접속 성공(IP 획득) → PASS
@@ -144,7 +144,7 @@ def evaluate_wifi_connect(
 
     if not conn.get("attempted"):
         result["detail"] = (
-            "WiFi 접속 테스트 미수행 — cli_wifi_config.yaml 의 wifi.ssid/password 가 "
+            "WiFi 접속 테스트 미수행 — config/wifi_config.yaml 의 wifi.ssid/password 가 "
             "비었거나, 런타임 접속 시도가 시간 내 완료되지 않음"
         )
         return result

@@ -17,7 +17,7 @@ Pose 연구에 들어가기 전, 구매한 보드의 정상 동작을 검증하�
 | RGB LED | 진단 펌웨어 WS2812 점등 | 펌웨어 없으면 SKIP |
 | BOOT Button | 진단 펌웨어 GPIO0 입력 | 대화형(`--no-button-test` 로 끔) |
 | WiFi Scan | 진단 펌웨어 AP 스캔 | 펌웨어 없으면 SKIP |
-| WiFi Connect | 진단 펌웨어 실제 AP 접속 | `cli_wifi_config.yaml` 자격증명 필요(미설정 SKIP) |
+| WiFi Connect | 진단 펌웨어 실제 AP 접속 | `config/wifi_config.yaml` 자격증명 필요(미설정 SKIP) |
 | Bluetooth LE | 진단 펌웨어 BLE 스캔 | 펌웨어 없으면 SKIP |
 | Temperature | 진단 펌웨어 내장 온도센서 | 펌웨어 없으면 SKIP |
 | GPIO | 진단 펌웨어 자유 GPIO 풀업/풀다운 | 펌웨어 없으면 SKIP |

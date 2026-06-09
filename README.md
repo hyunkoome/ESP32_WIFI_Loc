@@ -76,7 +76,7 @@ bash tools/board_check/scripts/step02_run_cli_based_diagnostics.sh
 bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
 ```
 
-> WiFi **접속** 테스트는 `tools/board_check/cli_wifi_config.yaml` 의 `wifi.ssid`/`wifi.password` 로
+> WiFi **접속** 테스트는 `config/wifi_config.yaml` 의 `wifi.ssid`/`wifi.password` 로
 > 실제 AP 에 붙어 봅니다(실행 시 런타임에 읽어 시리얼로 주입 — 펌웨어 재빌드 불필요).
 > 미설정/빈 값이면 해당 항목만 SKIP.
 
@@ -91,10 +91,17 @@ bash tools/board_check/scripts/step03_run_web_based_diagnostics.sh
 ## CSI 수집 (송수신 tx/rx)
 
 보드 진단이 끝났다면, ESP32-S3 들을 tx(송신)/rx(수신)로 나눠 CSI 를 수집합니다.
-송수신은 ESP-NOW 기반이라 라우터가 필요 없습니다. 자세히: [`csi/README.md`](csi/README.md).
+rx 의 `csi_recv` 는 **통합 수신 펌웨어**로, tx 의 ESP-NOW broadcast CSI 와 라우터(AP)
+CSI 를 **둘 다** 수집합니다. 호스트(GUI/web)가 신호원(tx / wifi router / all)을 골라
+분석하므로 신호원을 바꿔도 **재flash 가 필요 없습니다**. 자세히: [`csi/README.md`](csi/README.md).
 
 보드는 부팅 시 `DEVICE_ROLE` 을 출력해 **tx/rx 가 자동 표시**됩니다(매핑 파일 불필요).
 **연결만 하면** 대시보드가 감지하고, 보드별로 tx/rx 펌웨어를 골라 다운로드합니다.
+
+라우터 CSI 를 쓸 때 라우터 자격증명은 **펌웨어에 박지 않고 런타임 시리얼 주입**합니다 —
+호스트가 `config/wifi_config.yaml`(없으면 사용자 입력)을 읽어 `WIFI_CONNECT <ssid>\t<pw>`
+명령을 보내면 rx 가 라우터에 STA 접속 + 게이트웨이 ping 으로 라우터 CSI 를 수집하고,
+`WIFI_DISCONNECT` 로 tx(ESP-NOW 채널)로 복귀합니다.
 
 ```bash
 # 웹 대시보드 — 보드 실시간 감지 + tx/rx 펌웨어 다운로드 + CSI 진폭/위상 라이브
@@ -150,14 +157,19 @@ CSI 연구에 들어가기 전, 먼저 구매한 ESP32-S3 보드들의 하드웨
 
 ### ✅ 완료 (CSI 데이터 획득)
 
-- **CSI 송수신 펌웨어** — [esp-csi](docs/espressif.md) 기반 `csi_recv`/`csi_send`
-  (ESP-NOW, 라우터 불필요). 부팅 시 `DEVICE_ROLE` 출력으로 **tx/rx 자동 감지** ([`csi/firmware/`](csi/firmware/README.md))
+- **CSI 통합 수신 펌웨어** — [esp-csi](docs/espressif.md) 기반 `csi_recv` 가 tx 의
+  ESP-NOW broadcast CSI 와 라우터(AP) CSI 를 **둘 다** 수집(호스트가 신호원 선택,
+  재flash 불필요) + 송신 `csi_send`. 부팅 시 `DEVICE_ROLE` 출력으로 **tx/rx 자동 감지** ([`csi/firmware/`](csi/firmware/README.md))
+- **라우터 자격증명 런타임 시리얼 주입** — 펌웨어에 박지 않고 호스트가
+  `config/wifi_config.yaml`(없으면 입력)을 읽어 `WIFI_CONNECT` 으로 rx 에 주입 → STA
+  접속 + 게이트웨이 ping 으로 라우터 CSI 수집, `WIFI_DISCONNECT` 로 tx 복귀
 - **보드 실시간 감지 + role 자동표시** — `config_devices.yaml` 없이 연결만 하면 by-id
   로 감지하고 펌웨어 `DEVICE_ROLE` 로 tx/rx 를 자동 판별 ([`csi/common`](csi/README.md))
 - **멀티보드 펌웨어 다운로드** — web/GUI 대시보드에서 보드별 tx/rx 펌웨어 선택 flash
   (`scripts/csi_flash.sh` role+port 인자, merge-bin)
-- **CSI 진폭/위상 실시간 시각화** — **web**(`scripts/csi_app.sh`) 과 **데스크톱 GUI**
-  (PyQt5+pyqtgraph, `scripts/csi_gui.sh`) 둘 다, 공용 백엔드(`csi/common`) 공유
+- **CSI 실시간 시각화** — **web**(`scripts/csi_app.sh`) 과 **데스크톱 GUI**
+  (PyQt5+pyqtgraph, `scripts/csi_gui.sh`) 둘 다 진폭/위상/워터폴/도플러 스펙트럼을
+  실시간 표시 + 신호원 콤보(tx / wifi router / all), 공용 백엔드(`csi/common`) 공유
 - **CSI 수집·파싱** — 시리얼 → CSV 수집기(`--role` 실시간 감지) + 진폭/위상 파서 ([`csi/collect`](csi/collect/README.md) · [`csi/analysis`](csi/analysis/README.md))
 - **GitHub CI** — 펌웨어 빌드(esp32s3) + Python lint 워크플로 ([`.github/workflows`](.github/workflows/))
 
@@ -183,7 +195,8 @@ ESP32_WIFI_Loc/
 ├── hw/
 │   └── YD-ESP32-S3/      # 보드 하드웨어 자료(데이터시트/핀맵/벤더 펌웨어)
 ├── tools/
-│   └── board_check/      # 보드 자동 진단 도구 (+ firmware/, cli_wifi_config.yaml)
+│   └── board_check/      # 보드 자동 진단 도구 (+ firmware/)
+├── config/               # 프로젝트 공통 설정 (wifi_config.yaml: 진단+CSI 라우터 공유)
 ├── docs/                 # 설치/환경/하드웨어 세부 문서
 ├── scripts/              # 보조 스크립트 (csi_flash, csi_app, csi_gui, install_esp_idf 등)
 ├── .github/workflows/    # CI (펌웨어 빌드 + Python lint)

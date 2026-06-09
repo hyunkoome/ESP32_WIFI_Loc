@@ -165,7 +165,7 @@ except Exception:  # pragma: no cover
 
 
 def load_user_config() -> dict:
-    """cli_wifi_config.yaml 을 읽어 딕셔너리로 반환. 없거나 PyYAML 미설치면 빈 dict."""
+    """config/wifi_config.yaml 을 읽어 딕셔너리로 반환. 없거나 PyYAML 미설치면 빈 dict."""
     if yaml is None or not USER_CONFIG_YAML.exists():
         return {}
     try:
@@ -177,7 +177,7 @@ def load_user_config() -> dict:
 
 
 def wifi_credentials() -> tuple[str | None, str | None]:
-    """cli_wifi_config.yaml 의 wifi.ssid / wifi.password 를 (ssid, password) 로 반환."""
+    """config/wifi_config.yaml 의 wifi.ssid / wifi.password 를 (ssid, password) 로 반환."""
     cfg = load_user_config()
     wifi = cfg.get("wifi") or {}
     if not isinstance(wifi, dict):

@@ -47,14 +47,17 @@ localization, WiFi pose estimation.
   **하드코딩 금지**.
 - `.env`, `env/` 디렉터리는 **절대 commit 금지** (`.gitignore` 처리됨).
 - 설정 파일은 **관심사별로 분리**하고, 모두 commit 포함한다:
-  - `tools/board_check/cli_wifi_config.yaml` — **CLI 진단 전용** WiFi 자격증명(접속
-    테스트용). 사용자 요청으로 commit 포함(민감값 주의). `tools/board_check/config.py`
-    가 `BASE_DIR/cli_wifi_config.yaml` 로 읽어 실행 시 시리얼로 펌웨어에 런타임 주입.
-    **웹 대시보드는 이 파일을 쓰지 않는다**(사용자가 WiFi 탭에서 직접 입력).
+  - `config/wifi_config.yaml` — **프로젝트 공통** WiFi 자격증명(접속 테스트용 +
+    CSI 라우터 접속용). board_check 진단과 CSI GUI/web 이 함께 쓴다. 사용자 요청으로
+    commit 포함(민감값 주의). board_check 의 `config.py` 가 이 파일을 읽어 진단 실행
+    시 시리얼로 펌웨어에 런타임 주입하고, CSI 호스트(GUI/web)는 같은 파일을 읽어
+    `WIFI_CONNECT` 으로 rx 에 라우터 자격증명을 주입한다(없으면 사용자가 직접 입력).
+    **board_check 웹 대시보드는 이 파일을 쓰지 않는다**(사용자가 WiFi 탭에서 직접 입력).
   - CSI tx/rx 보드 식별은 **파일이 아니라 실시간 감지**로 한다 — 보드가 부팅 시
     출력하는 `DEVICE_ROLE` 로 tx/rx 를 자동 판별(`csi/common/role_detect.py`),
     by-id 로 보드 고정 식별(`csi/common/boards.py`). config_devices.yaml 은 없앴다.
-  - 전역(프로젝트 공통) 설정이 생기면 그때 **루트** `config.yaml` 을 만든다.
+  - 전역(프로젝트 공통) 설정은 **루트 `config/`** 아래에 둔다(현재
+    `config/wifi_config.yaml`). 새 공통 설정이 생기면 같은 디렉터리에 추가한다.
 - 비밀값 / 토큰 / 경로 등 환경 의존 값은 코드에 **하드코딩 금지**(환경변수 또는 위 설정).
 - 진단 도구의 상수(VID/PID, 타임아웃, 경로, 검사 항목)는
   `tools/board_check/config.py` 한 곳에 모은다. 값 변경은 가급적 이 파일만.

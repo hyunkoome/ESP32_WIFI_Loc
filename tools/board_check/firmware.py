@@ -229,7 +229,7 @@ def run_firmware_diagnostics(
     펌웨어 flash -> 부팅 대기 -> DIAG 출력 읽기를 한 번에 수행.
 
     WiFi '접속' 테스트는 펌웨어에 자격증명을 박지 않는다. wifi_from_config 가 True
-    (CLI)면 cli_wifi_config.yaml 에 자격증명이 있을 때 read_diagnostics 가 '같은
+    (CLI)면 config/wifi_config.yaml 에 자격증명이 있을 때 read_diagnostics 가 '같은
     시리얼 연결'로 런타임 주입해 결과를 채운다. False(웹)면 yaml 을 쓰지 않고, 사용자가
     WiFi 탭에서 입력한 값으로 별도 접속 명령을 보낸다(여기서는 SKIP 상태로 둠).
 
@@ -254,7 +254,7 @@ def run_firmware_diagnostics(
         }
     # flash 직후 보드가 재부팅되며 진단을 출력하기까지 잠시 대기.
     time.sleep(1.5)
-    # CLI(wifi_from_config=True)만 cli_wifi_config.yaml 자격증명을 '같은 시리얼 연결'로
+    # CLI(wifi_from_config=True)만 config/wifi_config.yaml 자격증명을 '같은 시리얼 연결'로
     # 런타임 주입한다(read_diagnostics 가 한 사이클을 읽은 뒤 WIFI_CONNECT 를 보내고
     # attempted=true 결과를 받음 — 포트를 끊었다 다시 열지 않아 명령이 안전히 닿는다).
     # 웹은 False 라 yaml 을 쓰지 않고, 사용자가 WiFi 탭 입력으로 별도 명령을 보낸다.

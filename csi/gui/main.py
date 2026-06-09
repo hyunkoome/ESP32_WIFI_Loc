@@ -104,19 +104,27 @@ class MainWindow(QtWidgets.QMainWindow):
         # --- tx 링크 탭: 진폭/위상/워터폴 ---
         tx_w = QtWidgets.QWidget()
         tx_v = QtWidgets.QVBoxLayout(tx_w)
-        self.amp_plot = pg.PlotWidget(title="진폭 |H| (서브캐리어)")
+        self.amp_plot = pg.PlotWidget(title="진폭 |H| — 서브캐리어별 채널 세기")
+        self.amp_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
+        self.amp_plot.setLabel("left", "진폭 |H|")
         self.amp_curve = self.amp_plot.plot(pen=pg.mkPen("#4aa3ff", width=1.5))
-        self.phase_plot = pg.PlotWidget(title="위상 ∠H (rad)")
+        self.phase_plot = pg.PlotWidget(title="위상 ∠H — 서브캐리어별 위상")
+        self.phase_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
+        self.phase_plot.setLabel("left", "위상 (rad)")
         self.phase_plot.setYRange(-3.2, 3.2)
         self.phase_curve = self.phase_plot.plot(pen=pg.mkPen("#f5a623", width=1.5))
-        self.wf_plot = pg.PlotWidget(title="워터폴 (가로=서브캐리어, 세로=시간, 색=진폭)")
+        self.wf_plot = pg.PlotWidget(title="워터폴 — 시간에 따른 서브캐리어 진폭(색=진폭)")
+        self.wf_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
+        self.wf_plot.setLabel("left", "시간 (프레임, 위=최근)")
         self.wf_img = pg.ImageItem()
         self.wf_plot.addItem(self.wf_img)
         try:
             self.wf_img.setColorMap(pg.colormap.get("viridis"))
         except Exception:
             pass
-        self.dop_plot = pg.PlotWidget(title="도플러 스펙트럼 (가로=움직임 주파수 Hz, 세로=세기)")
+        self.dop_plot = pg.PlotWidget(title="도플러 스펙트럼 — 진폭 시간변화의 FFT(움직임 주파수)")
+        self.dop_plot.setLabel("bottom", "움직임 주파수 (Hz)")
+        self.dop_plot.setLabel("left", "세기 (FFT 크기)")
         self.dop_curve = self.dop_plot.plot(pen=pg.mkPen("#2ecc71", width=1.5))
         tx_v.addWidget(self.amp_plot)
         tx_v.addWidget(self.phase_plot)
@@ -138,7 +146,7 @@ class MainWindow(QtWidgets.QMainWindow):
         rx_v.addLayout(row)
         rx_v.addWidget(QtWidgets.QLabel(
             "<b>tx</b> = ESP-NOW 송신기 CSI, <b>wifi router</b> = 라우터(AP) CSI.\n"
-            "wifi router 선택 시 cli_wifi_config.yaml(없으면 직접 입력)을 읽어 rx 에\n"
+            "wifi router 선택 시 config/wifi_config.yaml(없으면 직접 입력)을 읽어 rx 에\n"
             "WIFI_CONNECT 를 보냅니다(rx 가 STA 접속+ping → 라우터 CSI). all = 둘 다 표시.\n"
             "⚠ 라우터 접속 시 그 채널로 고정 — tx 가 다른 채널이면 tx 신호는 끊깁니다."
         ))
@@ -232,7 +240,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return "", ""
 
     def _send_wifi_connect(self) -> None:
-        """라우터 자격증명을 cli_wifi_config(없으면 입력)에서 얻어 rx 로 WIFI_CONNECT 전송."""
+        """라우터 자격증명을 config/wifi_config.yaml(없으면 입력)에서 얻어 rx 로 WIFI_CONNECT 전송."""
         if self._send_q is None:
             self._append_log("라우터 접속: rx 스트림이 먼저 시작돼야 합니다(rx 보드 연결 확인).")
             return

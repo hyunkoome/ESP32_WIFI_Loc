@@ -63,8 +63,8 @@ echo "[1/3] ESP-IDF 환경 활성화: ${IDF_DIR}"
 source "${IDF_DIR}/export.sh" >/dev/null
 
 # 참고: WiFi 접속 테스트 자격증명은 더 이상 빌드 시 펌웨어에 주입하지 않는다.
-# 진단 실행 시점에 호스트(main.py / 웹)가 cli_wifi_config.yaml 을 읽어 시리얼 'WIFI_CONNECT'
-# 명령으로 런타임 주입한다. 따라서 cli_wifi_config.yaml 만 바꿔도 재빌드가 필요 없다.
+# 진단 실행 시점에 호스트(main.py / 웹)가 config/wifi_config.yaml 을 읽어 시리얼 'WIFI_CONNECT'
+# 명령으로 런타임 주입한다. 따라서 config/wifi_config.yaml 만 바꿔도 재빌드가 필요 없다.
 
 # --- 3) 빌드 ------------------------------------------------------------------
 cd "${FW_DIR}"

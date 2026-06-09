@@ -151,7 +151,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                     board,
                     use_sudo=use_sudo,
                     use_firmware=True,
-                    # 웹은 cli_wifi_config.yaml 을 쓰지 않는다. WiFi 접속은 사용자가
+                    # 웹은 config/wifi_config.yaml 을 쓰지 않는다. WiFi 접속은 사용자가
                     # WiFi 탭에서 AP 선택 + 비번 입력으로 직접 테스트한다.
                     wifi_from_config=False,
                     progress=lambda m: push({"type": "progress", "msg": m}),

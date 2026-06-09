@@ -54,7 +54,7 @@ def diagnose_board(
     stress      : 스트레스 테스트 반복 횟수(0이면 비활성)
     min_ap      : WiFi PASS 판정 최소 AP 개수
     progress    : 진행 상황 콜백(문자열 메시지)
-    wifi_from_config: WiFi 접속 테스트 자격증명을 cli_wifi_config.yaml 에서 읽어
+    wifi_from_config: WiFi 접속 테스트 자격증명을 config/wifi_config.yaml 에서 읽어
                       런타임 주입할지 여부. CLI 는 True(자동 주입), 웹은 False
                       (사용자가 WiFi 탭에서 직접 입력하므로 yaml 을 쓰지 않음).
 
@@ -245,7 +245,7 @@ def diagnose_board(
         sublist=wifi_res.get("sublist"),
     )
 
-    # 6-2b) WiFi 접속 테스트 — cli_wifi_config.yaml 자격증명으로 실제 연결(런타임 시리얼 주입).
+    # 6-2b) WiFi 접속 테스트 — config/wifi_config.yaml 자격증명으로 실제 연결(런타임 시리얼 주입).
     wifi_conn_res = wifi_test.evaluate_wifi_connect(fw_diag if use_firmware else None)
     checks["wifi_connect"] = _check(
         wifi_conn_res["status"],

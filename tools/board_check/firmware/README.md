@@ -179,7 +179,7 @@ DIAG_DONE
 ```
 
 > WiFi 접속(`DIAG_WIFI_CONNECT`)은 부팅 시 자동으로 하지 않는다. 호스트(웹/CLI)가
-> 실행 시점에 `cli_wifi_config.yaml` 의 wifi.ssid/password 를 읽어 시리얼 `WIFI_CONNECT` 명령
+> 실행 시점에 `config/wifi_config.yaml` 의 wifi.ssid/password 를 읽어 시리얼 `WIFI_CONNECT` 명령
 > 으로 주입하면 그 결과가 여기 실린다(미설정/미주입이면 `attempted:false` → SKIP).
 
 ---
