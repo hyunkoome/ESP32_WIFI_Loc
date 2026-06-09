@@ -356,13 +356,16 @@ class RxTab(QtWidgets.QWidget):
             self._static_buf = []
         else:
             self._motion_buf = []
-        out = Path(__file__).resolve().parents[2] / "results"
-        out.mkdir(exist_ok=True)
+        out = Path(__file__).resolve().parents[2] / "dataset" / "csi_logs"
+        out.mkdir(parents=True, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S")
         self._csv_path = out / f"log_{mode}_{self.serial}_{ts}.csv"
         self._csv_f = open(self._csv_path, "w", newline="", encoding="utf-8")
         self._csv_w = csv.writer(self._csv_f)
-        self._csv_w.writerow(["t_sec", "wander", "jitter", "rssi", "n_sub", "amplitude..."])
+        # 딥러닝 학습용 raw: 저장 가능한 값 모두 + 전체 float(반올림 없음).
+        # 라벨은 파일명의 mode(static/motion). 가변 길이 꼬리: raw_csi(i/q) → amp → phase.
+        self._csv_w.writerow(["t_sec", "source", "mac", "rssi", "rate", "n_sub",
+                              "wander", "jitter", "raw_csi_iq...(2*n_sub) then amp...(n_sub) then phase...(n_sub)"])
         self._log_start = time.monotonic()
         self.lbl_state.setText(f"Logging ({'static' if mode == 'static' else 'motion'})…")
         self.lbl_state.setStyleSheet("color:#f5a623;")
@@ -377,7 +380,7 @@ class RxTab(QtWidgets.QWidget):
         self._logging = None
         if self._csv_f is not None:
             self._csv_f.close()
-            self.bridge.log.emit(f"[{self.serial[-4:]}] raw saved → results/{self._csv_path.name}")
+            self.bridge.log.emit(f"[{self.serial[-4:]}] raw saved → dataset/csi_logs/{self._csv_path.name}")
             self._csv_f = None
             self._csv_w = None
         self.lbl_state.setText(
@@ -504,8 +507,13 @@ class RxTab(QtWidgets.QWidget):
         # 로깅 중이면 raw 데이터(타임스탬프+wander+jitter+진폭)를 CSV 에 기록.
         if self._logging and self._csv_w is not None:
             t = time.monotonic() - self._log_start
-            self._csv_w.writerow([f"{t:.3f}", f"{self._wander:.4f}", f"{self._jitter:.4f}",
-                                  p["rssi"], len(amp)] + [f"{a:.1f}" for a in amp])
+            # 저장 가능한 값 모두 + 전체 float(csv.writer 가 str(value) 로 반올림 없이 기록).
+            row = [t, p.get("source", ""), p.get("mac", ""), p["rssi"],
+                   p.get("rate", 0.0), len(amp), self._wander, self._jitter]
+            row += list(p.get("raw_csi", []))   # raw CSI i/q 원본(2*n_sub)
+            row += amp                           # amplitude (n_sub)
+            row += phase                         # phase (n_sub)
+            self._csv_w.writerow(row)
         self._update_classifier(move)
 
 

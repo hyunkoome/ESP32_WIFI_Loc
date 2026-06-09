@@ -51,6 +51,9 @@ archive/
 *.npy
 *.npz
 *.h5
+# 단, 딥러닝 학습용 CSI 로깅 데이터셋(amp+phase, 라벨=파일명 mode)은 추적(공유).
+!dataset/csi_logs/
+!dataset/csi_logs/*.csv
 
 # ===== OS / 에디터 =====
 .DS_Store

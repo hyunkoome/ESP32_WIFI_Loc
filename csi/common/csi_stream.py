@@ -39,8 +39,8 @@ def amp_phase(raw_csi: list[int]) -> tuple[list[float], list[float]]:
     for k in range(0, len(raw_csi) - 1, 2):
         i = raw_csi[k]
         q = raw_csi[k + 1]
-        amp.append(round(math.hypot(i, q), 2))
-        ph.append(round(math.atan2(q, i), 3))
+        amp.append(math.hypot(i, q))      # 반올림 없이 전체 float
+        ph.append(math.atan2(q, i))
     return amp, ph
 
 
@@ -128,9 +128,10 @@ def stream_csi(
                         "mac": pkt.mac,
                         "rssi": pkt.rssi,
                         "n_sub": len(amp),
-                        "rate": round(rate, 1),
+                        "rate": rate,
                         "amplitude": amp,
                         "phase": ph,
+                        "raw_csi": pkt.raw_csi,   # i/q 원본(딥러닝 raw)
                     }
                 )
     finally:
