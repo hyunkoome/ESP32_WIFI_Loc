@@ -12,9 +12,11 @@ UI 구성:
 """
 from __future__ import annotations
 
+import json
 import queue
 import sys
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -56,6 +58,49 @@ class Bridge(QtCore.QObject):
     csi_packet = QtCore.pyqtSignal(str, dict)        # (port, packet)
     stream_stopped = QtCore.pyqtSignal(str, object)  # (port, err)
     log = QtCore.pyqtSignal(str)
+    state_changed = QtCore.pyqtSignal(str, str, str, float)  # (port, serial, state, move)
+    move_event = QtCore.pyqtSignal(str, float)               # (serial, move)
+
+
+class SpaceMonitor(QtWidgets.QWidget):
+    """Space Monitoring 탭: rx 별 정적/움직임 상태 종합 + 움직임 이벤트 로그 + 분당 카운트."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        v = QtWidgets.QVBoxLayout(self)
+        v.addWidget(QtWidgets.QLabel(
+            "<b>Space Monitoring</b> — rx 별 정적/움직임 상태와 움직임 이벤트를 종합 표시"))
+        self._state_labels: dict[str, QtWidgets.QLabel] = {}
+        self.state_box = QtWidgets.QVBoxLayout()
+        sw = QtWidgets.QWidget(); sw.setLayout(self.state_box)
+        v.addWidget(sw)
+        v.addWidget(QtWidgets.QLabel("움직임 이벤트 로그 (시각 · rx · 변동):"))
+        self.event_log = QtWidgets.QPlainTextEdit()
+        self.event_log.setReadOnly(True)
+        v.addWidget(self.event_log, 1)
+        self.lbl_count = QtWidgets.QLabel("최근 1분 움직임: 0회")
+        fnt = self.lbl_count.font(); fnt.setBold(True); self.lbl_count.setFont(fnt)
+        v.addWidget(self.lbl_count)
+        self._move_times: list[float] = []
+
+    def on_state(self, port: str, serial: str, state: str, move: float) -> None:
+        lbl = self._state_labels.get(serial)
+        if lbl is None:
+            lbl = QtWidgets.QLabel()
+            fnt = lbl.font(); fnt.setPointSize(13); fnt.setBold(True); lbl.setFont(fnt)
+            self._state_labels[serial] = lbl
+            self.state_box.addWidget(lbl)
+        moving = state == "move"
+        lbl.setText(f"{serial[-4:]} :  {'🔴 움직임' if moving else '🟢 정적'}   (변동 {move:.2f})")
+        lbl.setStyleSheet("color:#ff5555;" if moving else "color:#2ecc71;")
+
+    def on_move(self, serial: str, move: float) -> None:
+        ts = time.strftime("%H:%M:%S")
+        self.event_log.appendPlainText(f"{ts}   [{serial[-4:]}]   움직임 시작 (변동 {move:.2f})")
+        now = time.monotonic()
+        self._move_times.append(now)
+        self._move_times = [t for t in self._move_times if now - t <= 60]
+        self.lbl_count.setText(f"최근 1분 움직임: {len(self._move_times)}회")
 
 
 class RxTab(QtWidgets.QWidget):
@@ -70,6 +115,18 @@ class RxTab(QtWidgets.QWidget):
         self._wf: np.ndarray | None = None
         self._dop_smooth: np.ndarray | None = None
         self._dop_ymax = 60.0  # 도플러 세로 상한(피크를 천천히 따라가 출렁임 최소)
+        # 정적/움직임 분류기(간단 임계). 학습으로 기준을 잡고 변동지표로 실시간 판단.
+        self._static_ref: float | None = None
+        self._motion_ref: float | None = None
+        self._thresh: float | None = None
+        self._learn_mode: str | None = None   # "static" | "motion" | None
+        self._learn_buf: list[float] = []
+        self._learn_until = 0.0
+        self._move = 0.0                       # 최근 움직임지표(변동)
+        self._state = "static"                 # 확정 상태: static | move
+        self._pending_state = "static"
+        self._pending_count = 0
+        self._outlier_n = 3                    # 연속 N회 같아야 확정(outlier 필터)
         self._send_q: "queue.Queue[str]" = queue.Queue()
         self._stop = threading.Event()
         self._build()
@@ -90,20 +147,49 @@ class RxTab(QtWidgets.QWidget):
         row.addStretch(1)
         v.addLayout(row)
 
+        # 정적/움직임 분류기 UI: 학습시간 설정 → 학습(정적·움직임) → 임계 → 실시간 판단.
+        crow = QtWidgets.QHBoxLayout()
+        crow.addWidget(QtWidgets.QLabel("로깅시간(학습용)"))
+        self.learn_sec = QtWidgets.QSpinBox()
+        self.learn_sec.setRange(2, 60)
+        self.learn_sec.setValue(5)
+        self.learn_sec.setSuffix(" 초")
+        crow.addWidget(self.learn_sec)
+        self.btn_static = QtWidgets.QPushButton("정적 학습")
+        self.btn_static.clicked.connect(lambda: self._learn("static"))
+        self.btn_motion = QtWidgets.QPushButton("움직임 학습")
+        self.btn_motion.clicked.connect(lambda: self._learn("motion"))
+        self.btn_save = QtWidgets.QPushButton("파라미터 저장")
+        self.btn_save.clicked.connect(self._save_params)
+        crow.addWidget(self.btn_static)
+        crow.addWidget(self.btn_motion)
+        crow.addWidget(self.btn_save)
+        crow.addSpacing(16)
+        self.lbl_state = QtWidgets.QLabel("상태: 정적·움직임 둘 다 학습하면 판단 시작")
+        fnt = self.lbl_state.font(); fnt.setPointSize(13); fnt.setBold(True)
+        self.lbl_state.setFont(fnt)
+        crow.addWidget(self.lbl_state)
+        crow.addStretch(1)
+        v.addLayout(crow)
+
         self.amp_plot = pg.PlotWidget(title="진폭 |H| — 서브캐리어별 채널 세기")
         self.amp_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
         self.amp_plot.setLabel("left", "진폭 |H|")
+        self.amp_plot.setMouseEnabled(x=False, y=False)  # 마우스로 축 못 바꾸게(자동 범위 유지)
+        self.amp_plot.enableAutoRange()                  # 어떤 라우터/tx 든 데이터에 맞춰 자동
         self.amp_curve = self.amp_plot.plot(pen=pg.mkPen("#4aa3ff", width=1.5))
 
         self.phase_plot = pg.PlotWidget(title="위상 ∠H — 서브캐리어별 위상")
         self.phase_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
         self.phase_plot.setLabel("left", "위상 (rad)")
+        self.phase_plot.setMouseEnabled(x=False, y=False)
         self.phase_plot.setYRange(-3.2, 3.2)
         self.phase_curve = self.phase_plot.plot(pen=pg.mkPen("#f5a623", width=1.5))
 
         self.wf_plot = pg.PlotWidget(title="워터폴 — 시간에 따른 서브캐리어 진폭(색=진폭)")
         self.wf_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
         self.wf_plot.setLabel("left", "시간 (프레임, 위=최근)")
+        self.wf_plot.setMouseEnabled(x=False, y=False)
         self.wf_img = pg.ImageItem()
         self.wf_plot.addItem(self.wf_img)
         try:
@@ -118,6 +204,7 @@ class RxTab(QtWidgets.QWidget):
         self.dop_plot.setXRange(0, 10, padding=0)
         self.dop_plot.setYRange(0, 60, padding=0)
         self.dop_plot.disableAutoRange()
+        self.dop_plot.setMouseEnabled(x=False, y=False)
         # stem 그래프: FFT 는 이산 주파수 빈이라 각 빈에 수직선(stem)+끝점으로 또렷이 구분.
         self.dop_curve = self.dop_plot.plot(pen=pg.mkPen("#2ecc71", width=1.5))
         self.dop_pts = self.dop_plot.plot(pen=None, symbol="o", symbolSize=5,
@@ -171,6 +258,67 @@ class RxTab(QtWidgets.QWidget):
         self._send_q.put(csi_stream.wifi_connect_cmd(ssid, pw))
         self.bridge.log.emit(f"[{tag}] WIFI_CONNECT → \"{ssid}\" (rx 가 라우터 접속 시도)")
 
+    # ---- 정적/움직임 분류기 ----
+    def _learn(self, mode: str) -> None:
+        sec = float(self.learn_sec.value())
+        self._learn_mode = mode
+        self._learn_buf = []
+        self._learn_until = time.monotonic() + sec
+        self.lbl_state.setText(f"학습 중: {'정적' if mode == 'static' else '움직임'} ({sec:.0f}초)…")
+        self.lbl_state.setStyleSheet("color:#f5a623;")
+
+    def _save_params(self) -> None:
+        if self._thresh is None:
+            self.bridge.log.emit(f"[{self.serial[-4:]}] 저장 실패: 정적·움직임 둘 다 학습하세요.")
+            return
+        out = Path(__file__).resolve().parents[2] / "results"
+        out.mkdir(exist_ok=True)
+        fp = out / f"classifier_{self.serial}.json"
+        fp.write_text(json.dumps({
+            "serial": self.serial, "source": self._want_source,
+            "static_ref": self._static_ref, "motion_ref": self._motion_ref,
+            "thresh": self._thresh, "outlier_n": self._outlier_n,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.bridge.log.emit(f"[{self.serial[-4:]}] 파라미터 저장 → {fp.name}")
+
+    def _update_classifier(self, move: float) -> None:
+        # 학습 중이면 변동지표를 수집하고, 끝나면 평균을 기준으로 임계를 계산한다.
+        if self._learn_mode:
+            self._learn_buf.append(move)
+            if time.monotonic() >= self._learn_until and self._learn_buf:
+                avg = sum(self._learn_buf) / len(self._learn_buf)
+                if self._learn_mode == "static":
+                    self._static_ref = avg
+                else:
+                    self._motion_ref = avg
+                self._learn_mode = None
+                if self._static_ref is not None and self._motion_ref is not None:
+                    self._thresh = (self._static_ref + self._motion_ref) / 2.0
+                self.bridge.log.emit(
+                    f"[{self.serial[-4:]}] 학습완료 "
+                    f"정적={None if self._static_ref is None else round(self._static_ref, 2)} "
+                    f"움직임={None if self._motion_ref is None else round(self._motion_ref, 2)} "
+                    f"임계={None if self._thresh is None else round(self._thresh, 2)}")
+            return
+        if self._thresh is None:
+            return
+        # outlier 필터: 연속 N회 같은 결과여야 상태를 확정(순간 노이즈로 안 튀게).
+        raw = "move" if move > self._thresh else "static"
+        if raw == self._pending_state:
+            self._pending_count += 1
+        else:
+            self._pending_state = raw
+            self._pending_count = 1
+        if self._pending_count >= self._outlier_n and raw != self._state:
+            self._state = raw
+            self.bridge.state_changed.emit(self.port, self.serial, raw, move)
+            if raw == "move":
+                self.bridge.move_event.emit(self.serial, move)
+        moving = self._state == "move"
+        self.lbl_state.setText(
+            f"{'🔴 움직임' if moving else '🟢 정적'}   (변동 {move:.2f} / 임계 {self._thresh:.2f})")
+        self.lbl_state.setStyleSheet("color:#ff5555;" if moving else "color:#2ecc71;")
+
     # ---- CSI 갱신 ----
     def on_csi(self, p: dict) -> None:
         src = p.get("source", "tx")
@@ -213,6 +361,15 @@ class RxTab(QtWidgets.QWidget):
         peak = float(self._dop_smooth.max()) * 1.3
         self._dop_ymax = max(peak, self._dop_ymax * 0.97, 30.0)
         self.dop_plot.setYRange(0, self._dop_ymax, padding=0)
+
+        # 움직임 지표: 워터폴 진폭의 시간 변동(서브캐리어별 std 평균). 가만히 ~1, 움직이면
+        # 2~2.5 로 또렷이 오른다 — 느린 움직임/노이즈에 약한 도플러보다 직관적인 지표.
+        move = float(self._wf.std(axis=0).mean())
+        self._move = move
+        self.lbl_stats.setText(
+            f"[{src}]  rate {p['rate']}  RSSI {p['rssi']}  sub {p['n_sub']}"
+            f"   |   움직임지표(변동) {move:.2f}")
+        self._update_classifier(move)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -259,9 +416,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tabs = QtWidgets.QTabWidget()
         v.addWidget(self.tabs, 1)
-        self._tab_hint = QtWidgets.QLabel(
-            "rx 로 감지된 보드가 있으면 여기에 탭이 생깁니다. 각 탭에서 신호원(tx/wifi router/all)을 고르세요.")
-        self.tabs.addTab(self._tab_hint, "안내")
+        # Space Monitoring(종합 상태/이벤트)을 첫 탭으로 고정. rx 탭은 감지될 때 추가된다.
+        self.space = SpaceMonitor()
+        self.tabs.addTab(self.space, "Space Monitoring")
+        self.bridge.state_changed.connect(self.space.on_state)
+        self.bridge.move_event.connect(self.space.on_move)
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
