@@ -109,6 +109,11 @@ class SpaceMonitor(QtWidgets.QWidget):
         v = QtWidgets.QVBoxLayout(self)
         v.addWidget(QtWidgets.QLabel(
             "<b>Space Monitoring</b> — per-rx state over time (y: 0 Empty / 1 Presence / 2 Motion)"))
+        # 최종 방 상태(다중 링크 voting): 활성 링크 ≥2 면 2표, 아니면 1표로 확정.
+        self.lbl_room = QtWidgets.QLabel("ROOM: ⚪ Empty")
+        fr = self.lbl_room.font(); fr.setPointSize(20); fr.setBold(True); self.lbl_room.setFont(fr)
+        v.addWidget(self.lbl_room)
+        self._rx_states: dict[str, str] = {}   # serial -> empty|presence|motion
         # rx 별 현재 상태 라벨(가로 배치).
         self._state_labels: dict[str, QtWidgets.QLabel] = {}
         self.state_box = QtWidgets.QHBoxLayout()
@@ -166,6 +171,9 @@ class SpaceMonitor(QtWidgets.QWidget):
         label, color, level = info.get(state, ("?", "#888888", 0))
         lbl.setText(f"{serial[-4:]}: {label}")
         lbl.setStyleSheet(f"color:{color};")
+        # 최종 방 상태 갱신(voting).
+        self._rx_states[serial] = state
+        self._vote()
         self._ensure(serial)
         ts, ss = self._series[serial]
         now = time.monotonic() - self._t0
@@ -173,6 +181,30 @@ class SpaceMonitor(QtWidgets.QWidget):
         while len(ts) > 2 and ts[0] < now - 120:   # 최근 120초만 보관
             ts.pop(0); ss.pop(0)
         self._redraw(serial)
+
+    def _vote(self) -> None:
+        """다중 링크 voting 으로 최종 방 상태 결정(reference room_presence_detection 차용).
+        활성 링크 ≥2 면 같은 상태 2표 이상, 1개뿐이면 1표로 확정 → 단일 링크 노이즈 완화."""
+        states = list(self._rx_states.values())
+        active = len(states)
+        if active == 0:
+            room = "empty"
+        else:
+            motion_n = sum(1 for s in states if s == "motion")
+            presence_n = sum(1 for s in states if s in ("presence", "motion"))
+            min_det = 2 if active >= 2 else 1
+            if motion_n >= min_det:
+                room = "motion"
+            elif presence_n >= min_det:
+                room = "presence"
+            else:
+                room = "empty"
+        info = {"empty": ("⚪ Empty", "#888888"),
+                "presence": ("🔵 Presence", "#4aa3ff"),
+                "motion": ("🟢 Motion", "#2ecc71")}
+        label, color = info[room]
+        self.lbl_room.setText(f"ROOM: {label}")
+        self.lbl_room.setStyleSheet(f"color:{color};")
 
     def _redraw(self, serial: str) -> None:
         ts, ss = self._series[serial]
@@ -214,12 +246,9 @@ class RxTab(QtWidgets.QWidget):
         self._dop_smooth: np.ndarray | None = None
         self._dop_ymax = 60.0  # 도플러 세로 상한(피크를 천천히 따라가 출렁임 최소)
         # 정적/움직임 분류기(간단 임계). 학습으로 기준을 잡고 변동지표로 실시간 판단.
-        self._static_ref: float | None = None
-        self._motion_ref: float | None = None
-        self._thresh: float | None = None
-        self._static_buf: list[float] = []     # 정적 상태 로깅 데이터(변동지표)
-        self._motion_buf: list[float] = []     # 동적 상태 로깅 데이터
-        self._logging: str | None = None       # "static" | "motion" | None (로깅 중)
+        # 3상태 로깅 버퍼(각 항목은 (wander, jitter) 쌍 리스트).
+        self._log_bufs: dict[str, list] = {"empty": [], "presence": [], "motion": []}
+        self._logging: str | None = None       # "empty" | "presence" | "motion" | None
         self._log_start = 0.0                  # 로깅 시작 시각(경과초 표시용)
         self._csv_f = None                     # raw 로깅 CSV 파일 핸들
         self._csv_w = None
@@ -360,10 +389,7 @@ class RxTab(QtWidgets.QWidget):
     def start_logging(self, mode: str) -> None:
         """정적/동적 상태 데이터 로깅 시작(stop_logging 까지). raw 데이터를 CSV 로도 저장."""
         self._logging = mode
-        if mode == "static":
-            self._static_buf = []
-        else:
-            self._motion_buf = []
+        self._log_bufs[mode] = []
         out = Path(__file__).resolve().parents[2] / "dataset" / "csi_logs"
         out.mkdir(parents=True, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S")
@@ -382,7 +408,7 @@ class RxTab(QtWidgets.QWidget):
         """로깅 종료(버퍼 확정 + CSV 닫기). 수집한 보드 수(1) 반환."""
         if self._logging is None:
             return 0
-        buf = self._static_buf if self._logging == "static" else self._motion_buf
+        buf = self._log_bufs[self._logging]
         done = self._logging
         elapsed = time.monotonic() - self._log_start
         self._logging = None
@@ -397,19 +423,26 @@ class RxTab(QtWidgets.QWidget):
         return 1
 
     def train(self) -> bool:
-        """로깅한 빈방(static)/움직임(motion) 데이터로 wander_th/jitter_th 학습 + yaml 갱신."""
-        if not self._static_buf or not self._motion_buf:
-            self.bridge.log.emit(f"[{self.serial[-4:]}] Cannot train: need both static(empty) and motion logging")
+        """로깅한 Empty/Presence/Motion 데이터로 wander_th/jitter_th 학습 + yaml 갱신.
+        - wander_th(presence 경계) = Empty 와 Presence 의 중간
+        - jitter_th(motion 경계)   = Presence(없으면 Empty) 와 Motion 의 중간
+        Presence 로깅이 없으면 Empty/Motion 만으로 추정한다."""
+        e = self._log_bufs["empty"]
+        p = self._log_bufs["presence"]
+        m = self._log_bufs["motion"]
+        if not e or not m:
+            self.bridge.log.emit(f"[{self.serial[-4:]}] Cannot train: need at least Empty + Motion logging")
             return False
-        # static_buf=빈방, motion_buf=움직임. 각 원소는 (wander, jitter) 쌍.
-        sw = [w for w, _ in self._static_buf]
-        sj = [j for _, j in self._static_buf]
-        mj = [j for _, j in self._motion_buf]
-        empty_wander = max(sw)             # 빈방 wander 최대 = presence baseline
-        empty_jitter = max(sj)             # 빈방 jitter(도플러) 최대
-        motion_jitter = sum(mj) / len(mj)  # 움직임 jitter 평균
-        self._wander_th = empty_wander * (1 + self._hyst)        # 빈방 초과면 사람(presence)
-        self._jitter_th = (empty_jitter + motion_jitter) / 2.0   # 빈방~움직임 중간(motion)
+        mean = lambda xs: sum(xs) / len(xs)
+        ew = [w for w, _ in e]; ej = [j for _, j in e]
+        mj = [j for _, j in m]
+        if p:
+            pw = [w for w, _ in p]; pj = [j for _, j in p]
+            self._wander_th = (mean(ew) + mean(pw)) / 2.0     # Empty vs Presence
+            self._jitter_th = (mean(pj) + mean(mj)) / 2.0     # Presence vs Motion
+        else:
+            self._wander_th = max(ew) * (1 + self._hyst)      # Presence 없으면 Empty 초과로
+            self._jitter_th = (max(ej) + mean(mj)) / 2.0
         save_motion_classifier(self.serial, {
             "source": self._want_source,
             "wander_th": float(self._wander_th),
@@ -423,11 +456,10 @@ class RxTab(QtWidgets.QWidget):
     def _update_classifier(self, wander: float, jitter: float) -> None:
         # 로깅 중이면 (wander, jitter) 쌍을 버퍼에 수집 + 경과시간/샘플수 표시.
         if self._logging:
-            buf = self._static_buf if self._logging == "static" else self._motion_buf
+            buf = self._log_bufs[self._logging]
             buf.append((wander, jitter))
             elapsed = time.monotonic() - self._log_start
-            kind = "static(empty)" if self._logging == "static" else "motion"
-            self.lbl_state.setText(f"Logging {kind} ({elapsed:.1f}s, {len(buf)} samples)")
+            self.lbl_state.setText(f"Logging {self._logging} ({elapsed:.1f}s, {len(buf)} samples)")
             return
         # 3상태 판정: jitter(도플러)>jth → Motion / elif wander(std)>wth → Presence / else Empty.
         # 히스테리시스: 현재 상태에서 빠져나갈 때는 낮은 임계, 진입할 때는 높은 임계(경계 진동 방지).
@@ -584,14 +616,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # 로깅 버튼은 토글 — 1번 누르면 시작, 다시 누르면 저장(정적/동적 로깅 시간이 달라도 OK).
         crow = QtWidgets.QHBoxLayout()
         crow.addWidget(QtWidgets.QLabel("Classifier:"))
-        self.btn_log_static = QtWidgets.QPushButton("Log Static Data")
-        self.btn_log_static.clicked.connect(lambda: self._do_logging("static"))
-        self.btn_log_motion = QtWidgets.QPushButton("Log Motion Data")
-        self.btn_log_motion.clicked.connect(lambda: self._do_logging("motion"))
+        # 3상태 로깅 버튼(Empty/Presence/Motion). 각 토글: 1번 시작 → 다시 누르면 저장.
+        self.btn_log = {}
+        for m in ("empty", "presence", "motion"):
+            b = QtWidgets.QPushButton(f"Log {m.capitalize()}")
+            b.clicked.connect(lambda _=False, mm=m: self._do_logging(mm))
+            self.btn_log[m] = b
+            crow.addWidget(b)
         self.btn_train = QtWidgets.QPushButton("Train Classifier")
         self.btn_train.clicked.connect(self._do_train)
-        crow.addWidget(self.btn_log_static)
-        crow.addWidget(self.btn_log_motion)
         crow.addWidget(self.btn_train)
         crow.addSpacing(20)
         # 현재 모드 표시(대기 / 로깅중 / 학습중 / 실시간 감지중).
@@ -703,29 +736,31 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._rx_tabs:
             self._append_log("No rx to log (connect/detect an rx board first).")
             return
-        btn = self.btn_log_static if mode == "static" else self.btn_log_motion
-        other = self.btn_log_motion if mode == "static" else self.btn_log_static
-        label = "Static" if mode == "static" else "Motion"
+        btn = self.btn_log[mode]
+        label = mode.capitalize()
         if self._logging_mode is None:
             # 1번째 클릭: 모든 rx 로깅 시작. 다른 버튼은 비활성(클릭한 버튼만 '저장'으로).
             for tab in self._rx_tabs.values():
                 tab.start_logging(mode)
             self._logging_mode = mode
-            btn.setText(f"⏺ {label} logging (click to finish)")
-            other.setEnabled(False)
+            btn.setText(f"⏺ {label} (click to finish)")
+            for m, b in self.btn_log.items():
+                if m != mode:
+                    b.setEnabled(False)
             self.btn_train.setEnabled(False)
             self.lbl_mode.setText(f"⏺ Logging {label} data…")
             self.lbl_mode.setStyleSheet("color:#f5a623;")
-            self._append_log(f"All rx ({len(self._rx_tabs)}) started {label} logging — click again to finish")
+            self._append_log(f"All rx ({len(self._rx_tabs)}) started {mode} logging — click again to finish")
         elif self._logging_mode == mode:
             # 2번째 클릭: 로깅 완료(저장). 버튼은 다시 '시작'으로 돌아간다.
             n = sum(tab.stop_logging() for tab in self._rx_tabs.values())
             self._logging_mode = None
-            btn.setText(f"Log {label} Data")
-            other.setEnabled(True)
+            btn.setText(f"Log {label}")
+            for b in self.btn_log.values():
+                b.setEnabled(True)
             self.btn_train.setEnabled(True)
             self._refresh_mode()
-            self._append_log(f"{label} logging saved ({n} rx)")
+            self._append_log(f"{mode} logging saved ({n} rx)")
 
     def _do_train(self) -> None:
         if not self._rx_tabs:
