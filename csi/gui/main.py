@@ -65,7 +65,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roles: dict[str, object] = {}
         self._stream_stop = threading.Event()
         self._stream_port: str | None = None     # 현재 스트림 중인 포트
-        self._wf: np.ndarray | None = None        # 워터폴 버퍼
+        self._wf: np.ndarray | None = None          # 워터폴 버퍼
+        self._dop_smooth: np.ndarray | None = None  # 도플러 스무딩(EMA) 상태
 
         self._build_ui()
         self.refresh()
@@ -269,10 +270,19 @@ class MainWindow(QtWidgets.QMainWindow):
         # 본다. 정적 성분(DC, 평균)을 빼 움직임만 남기고, 서브캐리어 평균으로 합친다.
         # 샘플레이트(fs)는 패킷 rate(Hz). 0Hz 근처=느린 움직임(호흡), 높을수록 빠른 움직임.
         wf = self._wf - self._wf.mean(axis=0, keepdims=True)
-        spec = np.abs(np.fft.rfft(wf, axis=0)).mean(axis=1)
+        win = np.hanning(wf.shape[0])[:, None]  # Hann 윈도우(FFT 누설 감소)
+        spec = np.abs(np.fft.rfft(wf * win, axis=0)).mean(axis=1)
         fs = float(p.get("rate") or 0.0) or 50.0
         freqs = np.fft.rfftfreq(self._wf.shape[0], 1.0 / fs)
-        self.dop_curve.setData(freqs, spec)
+        # 움직임은 저주파(호흡~0.3, 걷기~1-2Hz)이므로 0~10Hz 만 본다.
+        mask = freqs <= 10.0
+        sp = spec[mask]
+        # 시간 스무딩(EMA)으로 도플러를 안정화(노이즈 완화).
+        if self._dop_smooth is None or self._dop_smooth.shape != sp.shape:
+            self._dop_smooth = sp
+        else:
+            self._dop_smooth = 0.7 * self._dop_smooth + 0.3 * sp
+        self.dop_curve.setData(freqs[mask], self._dop_smooth)
 
     def _on_stream_stopped(self, err: object) -> None:
         self._stream_port = None
