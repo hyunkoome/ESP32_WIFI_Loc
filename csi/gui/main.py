@@ -460,10 +460,20 @@ class RxTab(QtWidgets.QWidget):
         else:
             self._wander_th = max(ew) * (1 + self._hyst)      # Presence 없으면 Empty 초과로
             self._jitter_th = (max(ej) + mean(mj)) / 2.0
+        def _stats(buf):
+            if not buf:
+                return None
+            ws = [w for w, _ in buf]; js = [j for _, j in buf]
+            return {"n": len(buf),
+                    "wander_mean": sum(ws) / len(ws), "wander_max": max(ws),
+                    "jitter_mean": sum(js) / len(js), "jitter_max": max(js)}
         save_motion_classifier(self.serial, {
             "source": self._want_source,
-            "wander_th": float(self._wander_th),
-            "jitter_th": float(self._jitter_th),
+            "wander_th": float(self._wander_th),   # presence 경계(Empty↔Presence)
+            "jitter_th": float(self._jitter_th),   # motion 경계(Presence↔Motion)
+            "empty": _stats(e),
+            "presence": _stats(p),
+            "motion": _stats(m),
         })
         self.bridge.log.emit(
             f"[{self.serial[-4:]}] Trained: wander_th={self._wander_th:.2f} "
