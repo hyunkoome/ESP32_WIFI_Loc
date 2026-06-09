@@ -27,7 +27,7 @@
 | [Espressif 생태계](docs/espressif.md) | Espressif GitHub 저장소 317개 전체를 프로젝트 관련도(★5~★1)로 정리 |
 | [보드 진단 도구](tools/board_check/README.md) | 보드 자동 진단 도구 사용법 (CLI + 웹) |
 | [진단 펌웨어](tools/board_check/firmware/README.md) | PSRAM/WiFi/LED/버튼 검사 펌웨어 빌드 |
-| [CSI 데이터 획득](csi/README.md) | CSI 송수신 펌웨어·수집·파싱·웹 모니터(tx/rx) |
+| [CSI 데이터 획득](csi/README.md) | CSI 송수신 펌웨어·수집·파싱·web/GUI 대시보드·3상태 인지·로깅/학습 |
 | [보드 하드웨어](hw/YD-ESP32-S3/README.KR.md) | YD-ESP32-S3 데이터시트/핀맵/스펙 |
 
 ## 하드웨어
@@ -115,6 +115,24 @@ python csi/collect/serial_collector.py --role rx --out results/csi_run01.csv
 > CSI 센싱은 **tx–rx 를 2~5m 띄워** 그 사이로 사람이 지나가게 배치합니다(붙여 두면
 > 감지 영역이 없음). 위치/다중 인원 정확도를 높이려면 **rx(앵커)를 여러 곳에 분산**하세요.
 
+대시보드는 **3상태(empty / presence / motion)** 를 실시간 판정하고, 상태별 CSI 를
+로깅해 학습(임계 계산)한 뒤 다중 rx **voting** 으로 방 상태를 정합니다. **web 과
+데스크톱 GUI 가 동일한 공용 분류기**([`csi/common/classifier.py`](csi/common/classifier.py))
+를 써 숫자가 100% 일치합니다. 자세히: [`csi/README.md`](csi/README.md).
+
+<table>
+<tr>
+<td><b>실내 HW 배치(tx 1 + rx 2 + WiFi AP)</b></td>
+<td><b>web 대시보드(모바일)</b></td>
+<td><b>데스크톱 GUI(방 상태)</b></td>
+</tr>
+<tr>
+<td><img src="docs/figures/indoor.png" width="260"></td>
+<td><img src="docs/figures/app02.jpg" width="200"></td>
+<td><img src="docs/figures/gui01.png" width="320"></td>
+</tr>
+</table>
+
 ## 개발 환경
 
 - Ubuntu Linux / Python 3.10+ (**venv**) / ESP-IDF 5.x
@@ -170,6 +188,15 @@ CSI 연구에 들어가기 전, 먼저 구매한 ESP32-S3 보드들의 하드웨
 - **CSI 실시간 시각화** — **web**(`scripts/csi_app.sh`) 과 **데스크톱 GUI**
   (PyQt5+pyqtgraph, `scripts/csi_gui.sh`) 둘 다 진폭/위상/워터폴/도플러 스펙트럼을
   실시간 표시 + 신호원 콤보(tx / wifi router / all), 공용 백엔드(`csi/common`) 공유
+- **라우터 자동 접속(재전송)** — `wifi router` 신호원 선택 시 router CSI 가 실제로
+  들어올 때까지 `WIFI_CONNECT` 를 주기 재전송(부팅 중 1회 전송 씹힘 문제 해결, web/GUI 동일)
+- **실시간 3상태 인지** — `empty / presence / motion` 판정(presence=진폭 std,
+  motion=도플러 피크) + 히스테리시스·outlier 필터 + 다중 rx **voting** 으로 방 상태 결정
+- **로깅 → 학습** — 상태별 raw CSI 를 CSV 로 로깅(`dataset/csi_logs/`)하고 임계
+  (std_th/doppler_th)를 학습해 `config/motion_detection.yaml` 에 저장(GUI Train, 또는
+  `csi/train_from_dataset.py` 일괄). 학습된 신호원으로 rx 기본 신호원 자동 선택
+- **공용 분류기 모듈** — web/GUI 가 [`csi/common/classifier.py`](csi/common/classifier.py)
+  (메트릭·3상태·로깅·학습·voting)를 공유해 **두 프런트의 숫자가 100% 일치**
 - **CSI 수집·파싱** — 시리얼 → CSV 수집기(`--role` 실시간 감지) + 진폭/위상 파서 ([`csi/collect`](csi/collect/README.md) · [`csi/analysis`](csi/analysis/README.md))
 - **GitHub CI** — 펌웨어 빌드(esp32s3) + Python lint 워크플로 ([`.github/workflows`](.github/workflows/))
 
@@ -189,8 +216,10 @@ ESP32_WIFI_Loc/
 │   ├── common/           #   web/GUI 공용 백엔드(보드 감지·role·flash·CSI 스트림)
 │   ├── collect/          #   시리얼 수집(--role 실시간 감지)
 │   ├── analysis/         #   CSI 파싱·전처리
-│   ├── web/              #   웹 대시보드(FastAPI): 감지·flash·진폭/위상 라이브
-│   └── gui/              #   데스크톱 GUI(PyQt5+pyqtgraph): web 과 동일 백엔드
+│   ├── web/              #   웹 대시보드(FastAPI): 감지·flash·3상태 인지·로깅·학습
+│   ├── gui/              #   데스크톱 GUI(PyQt5+pyqtgraph): web 과 동일 백엔드
+│   └── train_from_dataset.py  #   dataset CSV 일괄 학습 → motion_detection.yaml
+├── dataset/csi_logs/     # 상태별 로깅 CSV(log_<상태>_<serial>_<ts>.csv)
 ├── sensing/              # 응용 계층(예정): 다중 인원 감지 + pose/위치 추정
 ├── hw/
 │   └── YD-ESP32-S3/      # 보드 하드웨어 자료(데이터시트/핀맵/벤더 펌웨어)

@@ -8,39 +8,39 @@ motion_detection:
   classifiers:
     5B5E078007:
       source: tx
-      std_th: 0.9772851087372108
-      doppler_th: 11.17815370784355
+      std_th: 0.695616119288658
+      doppler_th: 15.121414932518466
       empty:
-        std_mean: 1.1684378366981985
-        std_max: 3.845607342943447
-        doppler_mean: 17.91468851311233
-        doppler_max: 87.8679098311829
+        std_mean: 0.659616492589232
+        std_max: 0.6861475513041477
+        doppler_mean: 7.187124197062412
+        doppler_max: 9.376430957298904
       presence:
-        std_mean: 0.786132380776223
-        std_max: 0.8661582072018539
-        doppler_mean: 9.338357606932199
-        doppler_max: 13.284822964359417
+        std_mean: 0.7316157459880839
+        std_max: 0.9686290286559108
+        doppler_mean: 9.415380240527778
+        doppler_max: 20.351553417979453
       motion:
-        std_mean: 0.8582510056088989
-        std_max: 0.9023957932049951
-        doppler_mean: 13.0179498087549
-        doppler_max: 16.446065202147864
+        std_mean: 1.1882197317151246
+        std_max: 1.4397858766563236
+        doppler_mean: 20.827449624509153
+        doppler_max: 35.69868443951655
     5C4C092284:
       source: router
-      std_th: 3.2356944971733017
-      doppler_th: 31.24901948930374
+      std_th: 1.067208710025553
+      doppler_th: 14.36114345640971
       empty:
-        std_mean: 4.54440419441302
-        std_max: 4.876512488263562
-        doppler_mean: 142.47515143227483
-        doppler_max: 178.1545981037856
+        std_mean: 1.0200776456522296
+        std_max: 1.2326793280830448
+        doppler_mean: 8.375685855237233
+        doppler_max: 10.843694169783264
       presence:
-        std_mean: 1.9269847999335834
-        std_max: 3.0814667351862077
-        doppler_mean: 31.798436364107776
-        doppler_max: 56.21320969431952
+        std_mean: 1.1143397743988763
+        std_max: 1.4850136304336696
+        doppler_mean: 11.131969980109933
+        doppler_max: 22.282839952248807
       motion:
-        std_mean: 2.1095640835623777
-        std_max: 2.5945636119721938
-        doppler_mean: 30.69960261449971
-        doppler_max: 43.39283528200508
+        std_mean: 1.372093894925391
+        std_max: 1.88625616032218
+        doppler_mean: 17.590316932709488
+        doppler_max: 24.59388930619209

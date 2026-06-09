@@ -35,6 +35,9 @@ from port_lock import port_lock  # noqa: E402
 
 WF_HISTORY = 120  # 워터폴 시간축 길이(최근 N 패킷)
 MOVE_WIN = 20     # 움직임지표(변동) 계산 윈도우(최근 N프레임 ~2초). 짧을수록 판단이 빠름
+# router CSI 가 안 들어올 때 WIFI_CONNECT 재전송 간격/최대 횟수(web 과 동일).
+ROUTER_RETRY_SEC = 2.0
+ROUTER_RETRY_MAX = 25
 
 
 def read_wifi_config() -> tuple[str, str]:
@@ -274,6 +277,7 @@ class RxTab(QtWidgets.QWidget):
                 self._doppler_th = float(clf["doppler_th"])
         self._send_q: "queue.Queue[str]" = queue.Queue()
         self._stop = threading.Event()
+        self._router_seen = threading.Event()  # router CSI 수신됨 → WIFI_CONNECT 재전송 중지
         self._build()
         self._start_stream()
 
@@ -359,29 +363,48 @@ class RxTab(QtWidgets.QWidget):
         tag = self.serial[-4:] if self.serial else self.port
         if "router" in text:
             self._want_source = "router"
-            self._send_wifi_connect()
+            self._ensure_router_connected()
         elif "all" in text:
             self._want_source = "all"
         else:
             self._want_source = "tx"
+            self._router_seen.set()   # 재전송 루프가 돌고 있으면 중지
             # tx 복귀: 라우터 연결을 끊어 ESP-NOW 채널(11)로 돌아간다.
             self._send_q.put("WIFI_DISCONNECT")
             self.bridge.log.emit(f"[{tag}] WIFI_DISCONNECT → back to tx (ESP-NOW) channel")
         self._wf = None
         self.bridge.log.emit(f"[{tag}] source → {self._want_source}")
 
-    def _send_wifi_connect(self) -> None:
+    def _ensure_router_connected(self) -> None:
+        """stream open(=보드 리셋) 후 부팅을 기다렸다가 WIFI_CONNECT 를 보내고, router CSI 가
+        실제로 들어올 때까지 주기 재전송한다(web 과 동일). 포트 open 직후(부팅 중) 1회 전송이
+        씹혀서 라우터에 영영 못 붙는 문제를 근본 해결한다."""
         tag = self.serial[-4:] if self.serial else self.port
         ssid, pw = read_wifi_config()
         if not ssid:
+            # config 에 없으면 GUI(메인) 스레드에서 직접 입력받는다(다이얼로그는 메인스레드 전용).
             ssid, ok = QtWidgets.QInputDialog.getText(self, "Router SSID", "Router SSID:")
             if not ok or not ssid:
                 return
             pw, ok = QtWidgets.QInputDialog.getText(self, "Router password", f"Password for '{ssid}':")
             if not ok:
                 return
-        self._send_q.put(csi_stream.wifi_connect_cmd(ssid, pw))
-        self.bridge.log.emit(f"[{tag}] WIFI_CONNECT → \"{ssid}\" (rx attempting to connect to router)")
+        cmd = csi_stream.wifi_connect_cmd(ssid, pw)
+        self._router_seen.clear()
+
+        def loop() -> None:
+            for i in range(ROUTER_RETRY_MAX):
+                # 첫 대기(ROUTER_RETRY_SEC)로 보드 부팅(~1초) 완료를 보장한 뒤 전송.
+                if self._stop.wait(ROUTER_RETRY_SEC):
+                    return                       # stream 종료됨
+                if self._router_seen.is_set() or self._want_source != "router":
+                    return                       # router CSI 들어옴 / source 변경 → 중지
+                self._send_q.put(cmd)
+                note = " (retry)" if i > 0 else ""
+                self.bridge.log.emit(
+                    f"[{tag}] WIFI_CONNECT → \"{ssid}\"{note} (rx attempting to connect to router)")
+
+        threading.Thread(target=loop, daemon=True).start()
 
     # ---- 정적/동적 로깅 + 학습(분류기) — 상단 공용 패널이 모든 rx 에 동시 호출 ----
     def start_logging(self, mode: str) -> None:
@@ -474,6 +497,11 @@ class RxTab(QtWidgets.QWidget):
             "presence": _stats(p),
             "motion": _stats(m),
         })
+        # 판정 상태머신도 즉시 새 임계로 재시작(web classifier.train 과 동일) — 학습 전
+        # 잔존한 state/pending 이 새 임계 판정에 끼어들지 않게.
+        self._state = "empty"
+        self._pending_state = "empty"
+        self._pending_count = 0
         self.bridge.log.emit(
             f"[{self.serial[-4:]}] Trained: std_th={self._std_th:.2f} "
             f"doppler_th={self._doppler_th:.1f} → motion_detection.yaml")
@@ -522,6 +550,8 @@ class RxTab(QtWidgets.QWidget):
     # ---- CSI 갱신 ----
     def on_csi(self, p: dict) -> None:
         src = p.get("source", "tx")
+        if src == "router":
+            self._router_seen.set()   # router CSI 수신 → WIFI_CONNECT 재전송 루프 중지 신호
         if self._want_source != "all" and src != self._want_source:
             return
         amp = p["amplitude"]
@@ -542,7 +572,9 @@ class RxTab(QtWidgets.QWidget):
         wf = self._wf - self._wf.mean(axis=0, keepdims=True)
         win = np.hanning(wf.shape[0])[:, None]
         spec = np.abs(np.fft.rfft(wf * win, axis=0)).mean(axis=1)
-        fs = float(p.get("rate") or 0.0) or 50.0
+        fs = float(p.get("rate") or 0.0)
+        if fs < 1.0:    # rate 미집계(초기)·저조(source 전환 직후 신호 끊김) 시 도플러 mask 가
+            fs = 50.0   # 비지 않도록 기본 50Hz. (fs<0.6 이면 freqs 가 전부 <0.3Hz → mask 빈 배열)
         freqs = np.fft.rfftfreq(self._wf.shape[0], 1.0 / fs)
         mask = (freqs >= 0.3) & (freqs <= 10.0)   # DC 근처 저주파(AGC/드리프트) 제외
         sp = spec[mask]
@@ -558,7 +590,7 @@ class RxTab(QtWidgets.QWidget):
         self.dop_curve.setData(xs, ys, connect="pairs")
         self.dop_pts.setData(f, self._dop_smooth)
         # 세로 상한: 피크에 여유(×1.3)를 두되 천천히(×0.97) 줄여 출렁임 없이 안 잘리게.
-        peak = float(self._dop_smooth.max()) * 1.3
+        peak = (float(self._dop_smooth.max()) if self._dop_smooth.size else 0.0) * 1.3
         self._dop_ymax = max(peak, self._dop_ymax * 0.97, 30.0)
         self.dop_plot.setYRange(0, self._dop_ymax, padding=0)
 
@@ -575,7 +607,8 @@ class RxTab(QtWidgets.QWidget):
         #  - motion = 도플러 피크(움직임 주파수 세기). 프레임차분(doppler)은 움직임 구분에
         #    실패했고, 도플러 피크가 빈방<정지<움직임으로 잘 갈렸다(검증 완료).
         #  - presence = std(전체 진폭 std). 사람 유무(호흡/멀티패스 변화)에 반응.
-        doppler_raw = float(self._dop_smooth.max()) if self._dop_smooth is not None else 0.0
+        doppler_raw = (float(self._dop_smooth.max())
+                       if self._dop_smooth is not None and self._dop_smooth.size else 0.0)
         std_raw = float(self._wf.std(axis=0).mean())
         self._doppler = (1.0 - self._ema) * self._doppler + self._ema * doppler_raw
         self._std = (1.0 - self._ema) * self._std + self._ema * std_raw
@@ -737,8 +770,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._rx_tabs[port] = tab
             self.tabs.addTab(tab, f"rx: {serial[-4:] if serial else port}")
             self.tabs.setCurrentWidget(tab)
-            # 첫 rx 는 WiFi AP(router) 를, 2번째부터는 tx 를 신호원으로 자동 설정.
-            tab.src_combo.setCurrentText("wifi router" if len(self._rx_tabs) == 1 else "tx")
+            # 신호원 기본값: 이 디바이스가 학습된 source(yaml classifiers[serial])가 있으면
+            # 그대로(예: 8007=tx, 2284=router), 없으면 순서(첫 rx=router, 2번째부터 tx).
+            _tc = (load_motion_config().get("classifiers") or {}).get(serial)
+            _tsrc = _tc.get("source") if isinstance(_tc, dict) else None
+            if _tsrc in ("tx", "router"):
+                tab.src_combo.setCurrentText("wifi router" if _tsrc == "router" else "tx")
+            else:
+                tab.src_combo.setCurrentText("wifi router" if len(self._rx_tabs) == 1 else "tx")
             self._append_log(f"rx tab added: {port} ({serial})")
         elif role != "rx" and port in self._rx_tabs:
             self._remove_rx_tab(port)

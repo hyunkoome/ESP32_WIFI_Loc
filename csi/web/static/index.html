@@ -21,14 +21,13 @@
     <div id="board-list" class="device-grid">Detecting…</div>
   </section>
 
-  <!-- Wi-Fi 자격증명(라우터 신호원용) — GUI 의 read_wifi_config 대체(브라우저 입력) -->
+  <!-- 라우터 자격증명은 호스트의 config/wifi_config.yaml 에서 자동 로드(GUI 와 동일).
+       web 사용자는 입력 불필요 — 첫 rx 가 그 SSID 로 자동 접속, 나머지는 tx(ESP-NOW). -->
   <section>
-    <h2>Wi-Fi router <span class="muted">· credentials for the 'wifi router' source (2.4GHz)</span></h2>
+    <h2>Wi-Fi router <span class="muted">· auto-loaded from host config/wifi_config.yaml</span></h2>
     <div class="live-bar">
-      <input id="wifi-ssid" type="text" placeholder="Router SSID" />
-      <input id="wifi-pw" type="password" placeholder="Password" />
-      <button id="btn-wifi" class="btn-mini">Apply</button>
-      <span class="hint">First rx auto-connects to the router. Others use tx (ESP-NOW).</span>
+      <span id="wifi-ssid-view" class="hint">SSID: (loading…)</span>
+      <span class="hint">First rx auto-connects to this router; others use tx (ESP-NOW).</span>
     </div>
   </section>
 

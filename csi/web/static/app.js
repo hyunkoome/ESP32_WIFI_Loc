@@ -23,6 +23,7 @@ const STATE_INFO = {
 };
 
 // ---- WebSocket -------------------------------------------------------------
+let pingTimer = null;
 function connectWs() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -30,8 +31,11 @@ function connectWs() {
     $("ws-status").textContent = "WebSocket: on";
     $("ws-status").className = "ws-on";
     refresh();
+    clearInterval(pingTimer);
+    pingTimer = setInterval(() => send({ action: "ping" }), 20000);  // keepalive: idle 끊김 방지
   };
   ws.onclose = () => {
+    clearInterval(pingTimer);
     $("ws-status").textContent = "WebSocket: off — reconnecting";
     $("ws-status").className = "ws-off";
     setTimeout(connectWs, 1500);
@@ -56,7 +60,8 @@ function handle(m) {
     case "log":          appendLog(m.line); break;
     case "stream_status": appendLog(m.msg); break;
     case "stream_stopped": if (m.error) appendLog(`[${m.port}] stream: ${m.error}`); break;
-    case "need_wifi":    appendLog("→ Enter router SSID/password in the Wi-Fi panel above."); break;
+    case "wifi":         $("wifi-ssid-view").textContent = `SSID: ${m.ssid || "(none in config)"}`; break;
+    case "need_wifi":    appendLog("→ Set SSID in host config/wifi_config.yaml (router source needs it)."); break;
     default: break;
   }
 }
@@ -262,6 +267,12 @@ function onMoveEvent(serial, doppler, ts) {
 
 // ---- 모드 표시(Idle/Logging/Detecting) ------------------------------------
 function renderMode(mode, detail) {
+  // 전역 로깅 상태를 모든 클라에 동기화 — 다른 기기에서 시작/종료해도 이 기기 버튼에 반영.
+  const newLogging = (mode === "logging") ? detail : null;
+  if (newLogging !== loggingMode) {
+    loggingMode = newLogging;
+    setLogButtons();
+  }
   const el = $("mode-badge");
   if (mode === "logging") {
     el.textContent = `⏺ Logging ${detail}…`; el.className = "mode-logging";
@@ -319,9 +330,6 @@ function appendLog(line) {
 $("btn-refresh").onclick = refresh;
 $("btn-log-clear").onclick = () => { $("flash-log").textContent = ""; };
 $("btn-train").onclick = () => send({ action: "train" });
-$("btn-wifi").onclick = () => {
-  send({ action: "set_wifi", ssid: $("wifi-ssid").value, password: $("wifi-pw").value });
-};
 
 setLogButtons();
 connectWs();

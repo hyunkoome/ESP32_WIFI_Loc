@@ -50,6 +50,18 @@ def load_motion_config() -> dict:
     return defaults
 
 
+def trained_source_for(serial: str) -> Optional[str]:
+    """이 디바이스(serial)의 학습된 신호원(classifiers[serial].source). 없으면 None.
+
+    rx 카드/탭 생성 시 기본 신호원을 '순서(첫=router)'가 아니라 **학습 데이터대로**
+    붙이기 위함 — 예: 8007 은 학습 때 tx, 2284 는 router 였으면 그대로 자동 선택.
+    """
+    clf = (load_motion_config().get("classifiers") or {}).get(serial)
+    if isinstance(clf, dict) and clf.get("source") in ("tx", "router"):
+        return str(clf["source"])
+    return None
+
+
 def save_motion_classifier(serial: str, params: dict) -> None:
     """학습 결과를 motion_detection.yaml 의 classifiers[serial] 에 저장(나머지 값 보존)."""
     import yaml
@@ -197,7 +209,9 @@ class RxClassifier:
         wf = self._wf - self._wf.mean(axis=0, keepdims=True)
         win = np.hanning(wf.shape[0])[:, None]
         spec = np.abs(np.fft.rfft(wf * win, axis=0)).mean(axis=1)
-        fs = float(p.get("rate") or 0.0) or 50.0
+        fs = float(p.get("rate") or 0.0)
+        if fs < 1.0:    # rate 미집계(초기)·저조(source 전환 직후 신호 끊김) 시 도플러 mask 가
+            fs = 50.0   # 비지 않도록 기본 50Hz. (fs<0.6 이면 freqs 가 전부 <0.3Hz → mask 빈 배열)
         freqs = np.fft.rfftfreq(self._wf.shape[0], 1.0 / fs)
         mask = (freqs >= 0.3) & (freqs <= 10.0)   # DC 근처 저주파(AGC/드리프트) 제외
         sp = spec[mask]
@@ -213,7 +227,11 @@ class RxClassifier:
         self._move = (1.0 - self._ema) * self._move + self._ema * move_raw
 
         # 두 메트릭(GUI 와 동일): motion=도플러 피크, presence=전체 진폭 std. EMA 스무딩.
-        doppler_raw = float(self._dop_smooth.max()) if self._dop_smooth is not None else 0.0
+        # 0.3~10Hz mask 가 빈 배열이면(rate 가 매우 낮거나 워터폴 시간축이 짧을 때)
+        # .max() 가 zero-size 로 터져 stream 스레드가 죽는다 → 빈 배열은 도플러 0 으로 안전 처리.
+        doppler_raw = (float(self._dop_smooth.max())
+                       if self._dop_smooth is not None and self._dop_smooth.size > 0
+                       else 0.0)
         std_raw = float(self._wf.std(axis=0).mean())
         self._doppler = (1.0 - self._ema) * self._doppler + self._ema * doppler_raw
         self._std = (1.0 - self._ema) * self._std + self._ema * std_raw
