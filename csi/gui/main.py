@@ -119,9 +119,9 @@ class RxTab(QtWidgets.QWidget):
         self._static_ref: float | None = None
         self._motion_ref: float | None = None
         self._thresh: float | None = None
-        self._learn_mode: str | None = None   # "static" | "motion" | None
-        self._learn_buf: list[float] = []
-        self._learn_until = 0.0
+        self._static_buf: list[float] = []     # 정적 상태 로깅 데이터(변동지표)
+        self._motion_buf: list[float] = []     # 동적 상태 로깅 데이터
+        self._logging: str | None = None       # "static" | "motion" | None (로깅 중)
         self._move = 0.0                       # 최근 움직임지표(변동)
         self._state = "static"                 # 확정 상태: static | move
         self._pending_state = "static"
@@ -145,32 +145,12 @@ class RxTab(QtWidgets.QWidget):
         self.lbl_stats = QtWidgets.QLabel("rate: -")
         row.addWidget(self.lbl_stats)
         row.addStretch(1)
-        v.addLayout(row)
-
-        # 정적/움직임 분류기 UI: 학습시간 설정 → 학습(정적·움직임) → 임계 → 실시간 판단.
-        crow = QtWidgets.QHBoxLayout()
-        crow.addWidget(QtWidgets.QLabel("로깅시간(학습용)"))
-        self.learn_sec = QtWidgets.QSpinBox()
-        self.learn_sec.setRange(2, 60)
-        self.learn_sec.setValue(5)
-        self.learn_sec.setSuffix(" 초")
-        crow.addWidget(self.learn_sec)
-        self.btn_static = QtWidgets.QPushButton("정적 학습")
-        self.btn_static.clicked.connect(lambda: self._learn("static"))
-        self.btn_motion = QtWidgets.QPushButton("움직임 학습")
-        self.btn_motion.clicked.connect(lambda: self._learn("motion"))
-        self.btn_save = QtWidgets.QPushButton("파라미터 저장")
-        self.btn_save.clicked.connect(self._save_params)
-        crow.addWidget(self.btn_static)
-        crow.addWidget(self.btn_motion)
-        crow.addWidget(self.btn_save)
-        crow.addSpacing(16)
-        self.lbl_state = QtWidgets.QLabel("상태: 정적·움직임 둘 다 학습하면 판단 시작")
-        fnt = self.lbl_state.font(); fnt.setPointSize(13); fnt.setBold(True)
+        # 이 rx 의 실시간 상태 라벨(로깅/학습은 상단 공용 패널에서 모든 rx 동시 수행).
+        self.lbl_state = QtWidgets.QLabel("상태: 학습 전")
+        fnt = self.lbl_state.font(); fnt.setPointSize(12); fnt.setBold(True)
         self.lbl_state.setFont(fnt)
-        crow.addWidget(self.lbl_state)
-        crow.addStretch(1)
-        v.addLayout(crow)
+        row.addWidget(self.lbl_state)
+        v.addLayout(row)
 
         self.amp_plot = pg.PlotWidget(title="진폭 |H| — 서브캐리어별 채널 세기")
         self.amp_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
@@ -258,47 +238,53 @@ class RxTab(QtWidgets.QWidget):
         self._send_q.put(csi_stream.wifi_connect_cmd(ssid, pw))
         self.bridge.log.emit(f"[{tag}] WIFI_CONNECT → \"{ssid}\" (rx 가 라우터 접속 시도)")
 
-    # ---- 정적/움직임 분류기 ----
-    def _learn(self, mode: str) -> None:
-        sec = float(self.learn_sec.value())
-        self._learn_mode = mode
-        self._learn_buf = []
-        self._learn_until = time.monotonic() + sec
-        self.lbl_state.setText(f"학습 중: {'정적' if mode == 'static' else '움직임'} ({sec:.0f}초)…")
+    # ---- 정적/동적 로깅 + 학습(분류기) — 상단 공용 패널이 모든 rx 에 동시 호출 ----
+    def start_logging(self, mode: str) -> None:
+        """정적/동적 상태 데이터(변동지표) 로깅 시작(stop_logging 까지 계속 수집)."""
+        self._logging = mode
+        if mode == "static":
+            self._static_buf = []
+        else:
+            self._motion_buf = []
+        self.lbl_state.setText(f"로깅 중({'정적' if mode == 'static' else '동적'})…")
         self.lbl_state.setStyleSheet("color:#f5a623;")
 
-    def _save_params(self) -> None:
-        if self._thresh is None:
-            self.bridge.log.emit(f"[{self.serial[-4:]}] 저장 실패: 정적·움직임 둘 다 학습하세요.")
-            return
+    def stop_logging(self) -> int:
+        """로깅 종료(저장). 수집한 보드 수(1) 반환."""
+        if self._logging is None:
+            return 0
+        buf = self._static_buf if self._logging == "static" else self._motion_buf
+        done = self._logging
+        self._logging = None
+        self.lbl_state.setText(f"{'정적' if done == 'static' else '동적'} 로깅 완료 ({len(buf)}샘플)")
+        self.lbl_state.setStyleSheet("color:#888;")
+        return 1
+
+    def train(self) -> bool:
+        """로깅한 정적/동적 데이터로 임계를 학습(분류기 생성) + 파라미터 저장."""
+        if not self._static_buf or not self._motion_buf:
+            self.bridge.log.emit(f"[{self.serial[-4:]}] 학습 불가: 정적·동적 둘 다 로깅 필요")
+            return False
+        self._static_ref = sum(self._static_buf) / len(self._static_buf)
+        self._motion_ref = sum(self._motion_buf) / len(self._motion_buf)
+        self._thresh = (self._static_ref + self._motion_ref) / 2.0
         out = Path(__file__).resolve().parents[2] / "results"
         out.mkdir(exist_ok=True)
-        fp = out / f"classifier_{self.serial}.json"
-        fp.write_text(json.dumps({
+        (out / f"classifier_{self.serial}.json").write_text(json.dumps({
             "serial": self.serial, "source": self._want_source,
             "static_ref": self._static_ref, "motion_ref": self._motion_ref,
             "thresh": self._thresh, "outlier_n": self._outlier_n,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.bridge.log.emit(f"[{self.serial[-4:]}] 파라미터 저장 → {fp.name}")
+        self.bridge.log.emit(
+            f"[{self.serial[-4:]}] 학습완료 정적={self._static_ref:.2f} "
+            f"동적={self._motion_ref:.2f} 임계={self._thresh:.2f}")
+        return True
 
     def _update_classifier(self, move: float) -> None:
-        # 학습 중이면 변동지표를 수집하고, 끝나면 평균을 기준으로 임계를 계산한다.
-        if self._learn_mode:
-            self._learn_buf.append(move)
-            if time.monotonic() >= self._learn_until and self._learn_buf:
-                avg = sum(self._learn_buf) / len(self._learn_buf)
-                if self._learn_mode == "static":
-                    self._static_ref = avg
-                else:
-                    self._motion_ref = avg
-                self._learn_mode = None
-                if self._static_ref is not None and self._motion_ref is not None:
-                    self._thresh = (self._static_ref + self._motion_ref) / 2.0
-                self.bridge.log.emit(
-                    f"[{self.serial[-4:]}] 학습완료 "
-                    f"정적={None if self._static_ref is None else round(self._static_ref, 2)} "
-                    f"움직임={None if self._motion_ref is None else round(self._motion_ref, 2)} "
-                    f"임계={None if self._thresh is None else round(self._thresh, 2)}")
+        # 로깅 중이면 해당 버퍼에 변동지표를 수집(분류 안 함).
+        if self._logging:
+            buf = self._static_buf if self._logging == "static" else self._motion_buf
+            buf.append(move)
             return
         if self._thresh is None:
             return
@@ -391,6 +377,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roles: dict[str, object] = {}
         self._serials: dict[str, str] = {}    # port -> serial
         self._rx_tabs: dict[str, RxTab] = {}  # port -> RxTab
+        self._logging_mode: str | None = None  # 공용 로깅 토글 상태(None | static | motion)
 
         self._build_ui()
         self.refresh()
@@ -413,6 +400,22 @@ class MainWindow(QtWidgets.QMainWindow):
         bw = QtWidgets.QWidget()
         bw.setLayout(self.board_box)
         v.addWidget(bw)
+
+        # 분류기 공용 패널(탭 위): 어느 탭에서든 누르면 모든 rx 가 동시에 로깅/학습한다.
+        # 로깅 버튼은 토글 — 1번 누르면 시작, 다시 누르면 저장(정적/동적 로깅 시간이 달라도 OK).
+        crow = QtWidgets.QHBoxLayout()
+        crow.addWidget(QtWidgets.QLabel("분류기:"))
+        self.btn_log_static = QtWidgets.QPushButton("정적 데이터 로깅 시작")
+        self.btn_log_static.clicked.connect(lambda: self._do_logging("static"))
+        self.btn_log_motion = QtWidgets.QPushButton("동적 데이터 로깅 시작")
+        self.btn_log_motion.clicked.connect(lambda: self._do_logging("motion"))
+        self.btn_train = QtWidgets.QPushButton("파라미터 학습(분류기)")
+        self.btn_train.clicked.connect(self._do_train)
+        crow.addWidget(self.btn_log_static)
+        crow.addWidget(self.btn_log_motion)
+        crow.addWidget(self.btn_train)
+        crow.addStretch(1)
+        v.addLayout(crow)
 
         self.tabs = QtWidgets.QTabWidget()
         v.addWidget(self.tabs, 1)
@@ -509,6 +512,39 @@ class MainWindow(QtWidgets.QMainWindow):
         tab = self._rx_tabs.get(port)
         if tab:
             tab.on_csi(p)
+
+    # ---- 분류기 공용 제어 (모든 rx 동시) ----
+    def _do_logging(self, mode: str) -> None:
+        if not self._rx_tabs:
+            self._append_log("로깅할 rx 가 없습니다(rx 보드 연결/감지 필요).")
+            return
+        btn = self.btn_log_static if mode == "static" else self.btn_log_motion
+        other = self.btn_log_motion if mode == "static" else self.btn_log_static
+        label = "정적" if mode == "static" else "동적"
+        if self._logging_mode is None:
+            # 1번째 클릭: 모든 rx 로깅 시작. 다른 버튼은 비활성(클릭한 버튼만 '저장'으로).
+            for tab in self._rx_tabs.values():
+                tab.start_logging(mode)
+            self._logging_mode = mode
+            btn.setText(f"⏺ {label} 로깅중 (클릭→완료)")
+            other.setEnabled(False)
+            self.btn_train.setEnabled(False)
+            self._append_log(f"모든 rx({len(self._rx_tabs)}개) {label} 로깅 시작 — 다시 누르면 완료")
+        elif self._logging_mode == mode:
+            # 2번째 클릭: 로깅 완료(저장). 버튼은 다시 '시작'으로 돌아간다.
+            n = sum(tab.stop_logging() for tab in self._rx_tabs.values())
+            self._logging_mode = None
+            btn.setText(f"{label} 데이터 로깅 시작")
+            other.setEnabled(True)
+            self.btn_train.setEnabled(True)
+            self._append_log(f"{label} 로깅 저장 완료 ({n}개 rx)")
+
+    def _do_train(self) -> None:
+        if not self._rx_tabs:
+            self._append_log("학습할 rx 가 없습니다.")
+            return
+        n = sum(1 for tab in self._rx_tabs.values() if tab.train())
+        self._append_log(f"파라미터 학습 완료: {n}/{len(self._rx_tabs)} rx — 이제 실시간 판단을 시작합니다.")
 
     # ---- flash ----
     def _flash(self, role: str, port: str) -> None:
