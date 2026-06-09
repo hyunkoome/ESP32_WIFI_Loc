@@ -490,9 +490,11 @@ class RxTab(QtWidgets.QWidget):
         # EMA 스무딩(yaml ema_alpha): 짧은 윈도우의 순간 노이즈로 상태가 튀지 않게.
         self._move = (1.0 - self._ema) * self._move + self._ema * move_raw
         move = self._move
-        # reference(room_presence_detection) 차용: presence/motion 분리용 두 메트릭.
-        # jitter(motion): 프레임 간 빠른 변화. wander(presence): 느린 변동(긴 윈도우 std).
-        jitter_raw = float(np.abs(np.diff(recent, axis=0)).mean()) if recent.shape[0] > 1 else 0.0
+        # reference 차용 + 실측 검증으로 재정의한 두 메트릭:
+        #  - motion = 도플러 피크(움직임 주파수 세기). 프레임차분(jitter)은 움직임 구분에
+        #    실패했고, 도플러 피크가 빈방<정지<움직임으로 잘 갈렸다(검증 완료).
+        #  - presence = wander(전체 진폭 std). 사람 유무(호흡/멀티패스 변화)에 반응.
+        jitter_raw = float(self._dop_smooth.max()) if self._dop_smooth is not None else 0.0
         wander_raw = float(self._wf.std(axis=0).mean())
         self._jitter = (1.0 - self._ema) * self._jitter + self._ema * jitter_raw
         self._wander = (1.0 - self._ema) * self._wander + self._ema * wander_raw
