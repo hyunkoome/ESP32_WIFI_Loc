@@ -1,0 +1,6 @@
+# CSI 웹 모니터(csi/web/app.py) 의존성.
+# CSI 수집/파싱 의존성에 더해 설치한다.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pyserial
+pyyaml

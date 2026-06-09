@@ -1,0 +1,36 @@
+# Python 코드 정적 검사 CI.
+# ruff 로 lint + 포맷 확인. 무거운 런타임 의존성(torch 등) 없이 빠르게 돈다.
+# 대상: 저장소 내 .py (reference/ · venv/ 등은 ruff 설정에서 제외).
+name: python-lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'
+      - '.github/workflows/python-lint.yml'
+      - 'pyproject.toml'
+  pull_request:
+    paths:
+      - '**.py'
+      - '.github/workflows/python-lint.yml'
+      - 'pyproject.toml'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: ruff 설치
+        run: pip install ruff
+
+      - name: ruff lint
+        run: ruff check .

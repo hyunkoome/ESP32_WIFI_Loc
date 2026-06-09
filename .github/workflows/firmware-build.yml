@@ -1,0 +1,38 @@
+# CSI 펌웨어(csi_recv / csi_send) ESP-IDF 빌드 CI.
+# esp-idf-ci-action 이 도커 안에서 idf.py build 를 돌린다. 하드웨어는 필요 없다.
+# 대상 칩: esp32s3 (YD-ESP32-S3 N16R8).
+name: firmware-build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'csi/firmware/**'
+      - '.github/workflows/firmware-build.yml'
+  pull_request:
+    paths:
+      - 'csi/firmware/**'
+      - '.github/workflows/firmware-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 빌드할 펌웨어 프로젝트 경로.
+        project:
+          - csi/firmware/csi_recv
+          - csi/firmware/csi_send
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: ESP-IDF 빌드 (${{ matrix.project }})
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          # CLAUDE.md 의 ESP-IDF 버전 표기와 일치(v5.4).
+          esp_idf_version: v5.4
+          target: esp32s3
+          path: ${{ matrix.project }}

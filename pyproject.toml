@@ -1,0 +1,27 @@
+# 저장소 Python 도구 설정.
+# 현재는 ruff(lint/format) 설정만 둔다. 패키지 빌드 용도는 아니다.
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+# lint 대상에서 제외할 경로:
+#  - reference/ : esp-csi 등 외부 원본(우리 스타일 책임 아님)
+#  - venv/, build/, managed_components/ : 가상환경·빌드 산출물
+#  - *_ref.py : 참고용으로 복사해 둔 원본 스크립트
+extend-exclude = [
+    "reference",
+    "venv",
+    "hw",
+    "**/build",
+    "**/managed_components",
+    "**/*_ref.py",
+]
+
+[tool.ruff.lint]
+# E(pycodestyle), F(pyflakes), I(isort) 로 보수적으로 시작.
+# UP(pyupgrade)는 기존 board_check 코드와 광범위하게 충돌하므로 지금은 제외한다.
+# (Dict→dict 등 대규모 자동변환은 별도 정리 작업에서 다룬다.)
+select = ["E", "F", "I"]
+# E501(라인 길이)은 한국어 주석이 많아 자주 걸리므로 완화.
+ignore = ["E501"]

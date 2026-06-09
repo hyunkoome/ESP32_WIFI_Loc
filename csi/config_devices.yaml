@@ -1,0 +1,21 @@
+# ESP32-S3 디바이스 인벤토리 — CSI 수집용 tx/rx 매핑.
+#
+# 자격증명이 아닌 하드웨어 인벤토리이므로 commit 포함한다.
+# (WiFi SSID/비밀번호 등 자격증명은 config.yaml 에 따로 둔다.)
+#
+# 필드:
+#   role   : tx → csi_send 펌웨어 / rx → csi_recv 펌웨어
+#   serial : USB-Serial 칩 고유 serial. 아래로 확인:
+#              ls /dev/serial/by-id/
+#            출력 예) usb-1a86_USB_Single_Serial_5C4C092284-if00 → serial 은 5C4C092284
+#            ttyACM 번호가 바뀌어도 이 값으로 보드를 고정 식별한다.
+#   name   : 사람이 식별하기 위한 별칭(로그/스크립트 출력용, 선택)
+#
+# tx/rx 를 여러 개 둬도 된다(리스트에 항목 추가). 역할 교체는 role 값만 tx ↔ rx.
+devices:
+  - role: rx
+    serial: "5C4C092284"   # /dev/serial/by-id/...5C4C092284-if00
+    name: "rx1"
+  - role: tx
+    serial: "5B5E076216"   # /dev/serial/by-id/...5B5E076216-if00
+    name: "tx1"

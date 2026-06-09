@@ -1,0 +1,6 @@
+# CSI 파싱·전처리(csi_parser.py) 의존성.
+# 설치: pip install -r requirements.txt
+#
+# 전체 GUI 뷰어(esp-csi 원본 csi_data_read_parse_ref.py)를 쓰려면
+# 추가로 requirements-viewer.txt 를 설치하세요.
+numpy

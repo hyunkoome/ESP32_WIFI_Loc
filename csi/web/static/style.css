@@ -1,0 +1,74 @@
+:root {
+  --bg: #0f1115;
+  --panel: #1a1d24;
+  --line: #2a2f3a;
+  --text: #e6e8eb;
+  --muted: #8b929e;
+  --ok: #2ecc71;
+  --off: #5a6472;
+  --accent: #4aa3ff;
+  --tx: #f5a623;
+  --rx: #4aa3ff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 24px;
+}
+
+header h1 { margin: 0 0 4px; font-size: 20px; }
+header .sub { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+
+section { margin-bottom: 28px; }
+h2 { font-size: 15px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+
+.device-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+.card .row { display: flex; justify-content: space-between; align-items: center; }
+.card .name { font-weight: 600; }
+.badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px; color: #0b0d10;
+}
+.badge.tx { background: var(--tx); }
+.badge.rx { background: var(--rx); }
+.card .meta { color: var(--muted); font-size: 12px; margin-top: 6px; word-break: break-all; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.dot.on { background: var(--ok); }
+.dot.off { background: var(--off); }
+
+.btn-mini {
+  background: var(--accent); color: #06101c; border: 0; border-radius: 6px;
+  padding: 5px 10px; font-size: 12px; cursor: pointer; font-weight: 600;
+}
+.btn-mini:disabled { background: #39424f; color: var(--muted); cursor: default; }
+.card .btn-mini { margin-top: 10px; width: 100%; }
+
+.live-bar { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.metric { color: var(--muted); font-size: 13px; }
+.metric b { color: var(--text); }
+#live-target { font-weight: 600; }
+
+canvas {
+  width: 100%; height: 280px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px;
+}
+.hint { color: var(--muted); font-size: 12px; }
+
+footer { border-top: 1px solid var(--line); padding-top: 10px; font-size: 12px; }
+.ws-on { color: var(--ok); }
+.ws-off { color: var(--off); }

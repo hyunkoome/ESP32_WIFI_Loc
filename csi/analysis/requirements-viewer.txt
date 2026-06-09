@@ -1,0 +1,20 @@
+# Python dependencies for csi_data_read_parse.py
+# Install with: pip install -r requirements.txt
+
+# Data processing
+numpy
+pandas
+
+# Serial communication
+pyserial
+
+# GUI framework
+PyQt5
+
+# Scientific plotting
+pyqtgraph
+matplotlib
+
+# Scientific computing
+scipy
+statsmodels
