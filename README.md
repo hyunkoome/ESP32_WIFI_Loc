@@ -6,13 +6,13 @@
 
 ## 목표
 
-- WiFi CSI 수집
-- 사람 존재 감지(Presence Detection)
-- 움직임 감지(Motion Detection)
-- 호흡 감지(Breathing Detection)
-- 제스처 인식(Gesture Recognition)
-- 실내 위치 추정(Localization)
-- WiFi 기반 포즈 인식(Pose Estimation)
+- [x] WiFi CSI 수집
+- [x] 사람 존재 감지(Presence Detection)
+- [x] 움직임 감지(Motion Detection)
+- [ ] 호흡 감지(Breathing Detection)
+- [ ] 제스처 인식(Gesture Recognition)
+- [ ] 실내 위치 추정(Localization)
+- [ ] WiFi 기반 포즈 인식(Pose Estimation)
 
 ## 📚 문서
 
@@ -40,7 +40,7 @@
 | PSRAM | 8MB (Octal) |
 | 무선 | WiFi 802.11 b/g/n (2.4GHz), BLE 5 |
 | 인터페이스 | USB-C UART(CH343) / USB-C 네이티브(USB-Serial-JTAG) |
-| 보유 수량 | 3대 (동시 연결 예정) |
+| 보유 수량 | 3대 (tx 1 + rx 2 동시 연결) |
 
 - **USB-C 포트가 2개**입니다 — 평소엔 오른쪽(`COM`) 하나만 쓰면 됩니다. 자세히:
   [USB-C 포트 가이드](docs/usb-ports.md)
@@ -197,15 +197,22 @@ CSI 연구에 들어가기 전, 먼저 구매한 ESP32-S3 보드들의 하드웨
   `csi/train_from_dataset.py` 일괄). 학습된 신호원으로 rx 기본 신호원 자동 선택
 - **공용 분류기 모듈** — web/GUI 가 [`csi/common/classifier.py`](csi/common/classifier.py)
   (메트릭·3상태·로깅·학습·voting)를 공유해 **두 프런트의 숫자가 100% 일치**
+- **다중 보드 동시 수집** — 여러 rx 보드를 각자 독립 스트림으로 동시 수집하고
+  (tx 1 + rx 다수 + WiFi AP, 다중 링크) 링크별 상태를 voting 으로 합쳐 방 상태 결정
+- **상태별 라벨 로깅** — `Log Empty/Presence/Motion` 으로 라벨된 raw CSI 를
+  `dataset/csi_logs/` 에 CSV 수집(딥러닝 학습용)
 - **CSI 수집·파싱** — 시리얼 → CSV 수집기(`--role` 실시간 감지) + 진폭/위상 파서 ([`csi/collect`](csi/collect/README.md) · [`csi/analysis`](csi/analysis/README.md))
 - **GitHub CI** — 펌웨어 빌드(esp32s3) + Python lint 워크플로 ([`.github/workflows`](.github/workflows/))
 
-### ⬜ 추가 예정 (To do · 다중 수집·센싱)
+### ⬜ 추가 예정 (To do · 센싱 고도화)
 
-- **다중 보드 동시 CSI 수집** — 여러 ESP32-S3 동기 수집(다중 링크)
-- **데이터셋 구축** — 수집 CSI 라벨링·윈도우 분할
-- **학습/추론 코드** ([`sensing/`](sensing/README.md)) — 카메라 없이 CSI 만으로 실내
-  **다중 인원 감지 + 각 사람 pose 추정**(+ presence / motion / breathing / localization)
+- **다중 보드 시간 동기화** — 위치/pose 정밀도를 위해 rx 간 타임스탬프 동기 수집
+  (현재는 rx 별 독립 스트림)
+- **데이터셋 윈도우 분할** — 라벨된 CSV 를 학습용 시계열 윈도우로 분할·전처리
+  (라벨 로깅은 완료)
+- **딥러닝 학습/추론 코드** ([`sensing/`](sensing/README.md)) — 임계 기반 3상태를 넘어
+  카메라 없이 CSI 만으로 실내 **다중 인원 감지 + 각 사람 pose 추정**
+  (+ breathing / 정밀 localization)
 
 ## 저장소 구조
 
