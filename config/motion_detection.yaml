@@ -5,7 +5,14 @@ motion_detection:
   move_window: 20     # 변동지표 계산 윈도우(최근 N 프레임, ~2초 @10Hz). 짧을수록 빠르고 노이즈↑
   ema_alpha: 0.3      # 변동지표 EMA 계수(0~1). 작을수록 부드럽고 느림, 클수록 민감하고 빠름
   outlier_n: 5        # 연속 N회 같은 결과여야 상태 확정(순간 튐 완화)
-  hysteresis: 0.15    # 히스테리시스 마진 = (동적평균-정적평균) × 이 비율. 경계 진동 방지
+  hysteresis: 0.15    # 히스테리시스 마진 = 임계 × 이 비율. 경계 진동 방지
 
-  # --- rx 별 학습 결과 (Train 시 자동 갱신, serial 키) ---
+  # --- 3상태 판정 디폴트 임계 (실측 검증 기반, rx 별 Train 전까지 사용) ---
+  # presence = wander(진폭 std), motion = jitter(도플러 피크).
+  # 판정: jitter > jitter_th → Motion / elif wander > wander_th → Presence / else Empty.
+  # 검증값: 빈방 wander~0.7·도플러~35, 정지 wander~1.0·도플러~66, 움직임 wander~1.5·도플러~120.
+  default_wander_th: 0.90   # presence 임계 — wander 가 이보다 크면 사람 있음
+  default_jitter_th: 75.0   # motion 임계 — jitter(도플러) 가 이보다 크면 움직임
+
+  # --- rx 별 학습 결과 (Train 시 자동 갱신, serial 키: wander_th/jitter_th) ---
   classifiers: {}

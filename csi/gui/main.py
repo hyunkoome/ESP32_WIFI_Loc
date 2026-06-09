@@ -108,7 +108,7 @@ class SpaceMonitor(QtWidgets.QWidget):
         super().__init__()
         v = QtWidgets.QVBoxLayout(self)
         v.addWidget(QtWidgets.QLabel(
-            "<b>Space Monitoring</b> — per-rx motion state over time (x=time, y=motion 1 / static 0)"))
+            "<b>Space Monitoring</b> — per-rx state over time (y: 0 Empty / 1 Presence / 2 Motion)"))
         # rx 별 현재 상태 라벨(가로 배치).
         self._state_labels: dict[str, QtWidgets.QLabel] = {}
         self.state_box = QtWidgets.QHBoxLayout()
@@ -117,10 +117,10 @@ class SpaceMonitor(QtWidgets.QWidget):
         # 상태 시계열 그래프(rx 별 색상, step). y=0 정적 / 1 움직임.
         self.plot = pg.PlotWidget()
         self.plot.setLabel("bottom", "Time (s)")
-        self.plot.setLabel("left", "Motion (1) / Static (0)")
+        self.plot.setLabel("left", "0 Empty / 1 Presence / 2 Motion")
         self.plot.addLegend(offset=(-10, 10))
         self.plot.showGrid(x=True, y=True, alpha=0.2)
-        self.plot.setYRange(-0.2, 1.4, padding=0)
+        self.plot.setYRange(-0.2, 2.4, padding=0)
         self.plot.setMouseEnabled(x=False, y=False)
         v.addWidget(self.plot, 2)
         self._curves: dict[str, object] = {}
@@ -151,7 +151,7 @@ class SpaceMonitor(QtWidgets.QWidget):
         color = self._COLORS[idx % len(self._COLORS)]
         self._curves[serial] = self.plot.plot(pen=pg.mkPen(color, width=2), name=serial[-4:])
 
-    def on_state(self, port: str, serial: str, state: str, move: float) -> None:
+    def on_state(self, port: str, serial: str, state: str, value: float) -> None:
         lbl = self._state_labels.get(serial)
         if lbl is None:
             lbl = QtWidgets.QLabel()
@@ -159,13 +159,17 @@ class SpaceMonitor(QtWidgets.QWidget):
             self._state_labels[serial] = lbl
             self.state_box.addWidget(lbl)
             self.state_box.addSpacing(12)
-        moving = state == "move"
-        lbl.setText(f"{serial[-4:]}: {'🔴Motion' if moving else '🟢Static'}")
-        lbl.setStyleSheet("color:#ff5555;" if moving else "color:#2ecc71;")
+        # 3상태: empty(0,회색) / presence(1,파랑) / motion(2,초록)
+        info = {"empty": ("⚪Empty", "#888888", 0),
+                "presence": ("🔵Presence", "#4aa3ff", 1),
+                "motion": ("🟢Motion", "#2ecc71", 2)}
+        label, color, level = info.get(state, ("?", "#888888", 0))
+        lbl.setText(f"{serial[-4:]}: {label}")
+        lbl.setStyleSheet(f"color:{color};")
         self._ensure(serial)
         ts, ss = self._series[serial]
         now = time.monotonic() - self._t0
-        ts.append(now); ss.append(1 if moving else 0)
+        ts.append(now); ss.append(level)
         while len(ts) > 2 and ts[0] < now - 120:   # 최근 120초만 보관
             ts.pop(0); ss.pop(0)
         self._redraw(serial)
@@ -221,10 +225,10 @@ class RxTab(QtWidgets.QWidget):
         self._csv_w = None
         self._csv_path: Path | None = None
         self._move = 0.0                       # EMA 스무딩된 움직임지표(변동)
-        self._wander = 0.0                     # presence 메트릭(느린 변동, 호흡/미세)
-        self._jitter = 0.0                     # motion 메트릭(빠른 변화, 움직임)
-        self._state = "static"                 # 확정 상태: static | move
-        self._pending_state = "static"
+        self._wander = 0.0                     # presence 메트릭(진폭 std)
+        self._jitter = 0.0                     # motion 메트릭(도플러 피크)
+        self._state = "empty"                  # 확정 3상태: empty | presence | motion
+        self._pending_state = "empty"
         self._pending_count = 0
         # 모션 인지 하이퍼파라미터 + 학습결과를 config/motion_detection.yaml 에서 로드(런타임).
         mc = load_motion_config()
@@ -232,11 +236,15 @@ class RxTab(QtWidgets.QWidget):
         self._ema = float(mc["ema_alpha"])
         self._outlier_n = int(mc["outlier_n"])
         self._hyst = float(mc["hysteresis"])
+        # 3상태 임계: yaml 디폴트 → rx 별 학습값(있으면)으로 덮어쓴다.
+        self._wander_th = float(mc.get("default_wander_th") or 0.9)
+        self._jitter_th = float(mc.get("default_jitter_th") or 75.0)
         clf = (mc.get("classifiers") or {}).get(serial)
-        if isinstance(clf, dict) and clf.get("thresh") is not None:
-            self._static_ref = clf.get("static_ref")
-            self._motion_ref = clf.get("motion_ref")
-            self._thresh = clf.get("thresh")
+        if isinstance(clf, dict):
+            if clf.get("wander_th") is not None:
+                self._wander_th = float(clf["wander_th"])
+            if clf.get("jitter_th") is not None:
+                self._jitter_th = float(clf["jitter_th"])
         self._send_q: "queue.Queue[str]" = queue.Queue()
         self._stop = threading.Event()
         self._build()
@@ -389,43 +397,51 @@ class RxTab(QtWidgets.QWidget):
         return 1
 
     def train(self) -> bool:
-        """로깅한 정적/동적 데이터로 임계를 학습 + config/motion_detection.yaml 갱신."""
+        """로깅한 빈방(static)/움직임(motion) 데이터로 wander_th/jitter_th 학습 + yaml 갱신."""
         if not self._static_buf or not self._motion_buf:
-            self.bridge.log.emit(f"[{self.serial[-4:]}] Cannot train: need both static and motion logging")
+            self.bridge.log.emit(f"[{self.serial[-4:]}] Cannot train: need both static(empty) and motion logging")
             return False
-        self._static_ref = sum(self._static_buf) / len(self._static_buf)
-        self._motion_ref = sum(self._motion_buf) / len(self._motion_buf)
-        self._thresh = (self._static_ref + self._motion_ref) / 2.0
+        # static_buf=빈방, motion_buf=움직임. 각 원소는 (wander, jitter) 쌍.
+        sw = [w for w, _ in self._static_buf]
+        sj = [j for _, j in self._static_buf]
+        mj = [j for _, j in self._motion_buf]
+        empty_wander = max(sw)             # 빈방 wander 최대 = presence baseline
+        empty_jitter = max(sj)             # 빈방 jitter(도플러) 최대
+        motion_jitter = sum(mj) / len(mj)  # 움직임 jitter 평균
+        self._wander_th = empty_wander * (1 + self._hyst)        # 빈방 초과면 사람(presence)
+        self._jitter_th = (empty_jitter + motion_jitter) / 2.0   # 빈방~움직임 중간(motion)
         save_motion_classifier(self.serial, {
             "source": self._want_source,
-            "static_ref": round(self._static_ref, 4),
-            "motion_ref": round(self._motion_ref, 4),
-            "thresh": round(self._thresh, 4),
+            "wander_th": float(self._wander_th),
+            "jitter_th": float(self._jitter_th),
         })
         self.bridge.log.emit(
-            f"[{self.serial[-4:]}] Trained: static={self._static_ref:.2f} "
-            f"motion={self._motion_ref:.2f} thresh={self._thresh:.2f} → motion_detection.yaml")
+            f"[{self.serial[-4:]}] Trained: wander_th={self._wander_th:.2f} "
+            f"jitter_th={self._jitter_th:.1f} → motion_detection.yaml")
         return True
 
-    def _update_classifier(self, move: float) -> None:
-        # 로깅 중이면 버퍼에 변동지표를 수집(분류 안 함) + 경과시간/샘플수 표시.
+    def _update_classifier(self, wander: float, jitter: float) -> None:
+        # 로깅 중이면 (wander, jitter) 쌍을 버퍼에 수집 + 경과시간/샘플수 표시.
         if self._logging:
             buf = self._static_buf if self._logging == "static" else self._motion_buf
-            buf.append(move)
+            buf.append((wander, jitter))
             elapsed = time.monotonic() - self._log_start
-            kind = "static" if self._logging == "static" else "motion"
+            kind = "static(empty)" if self._logging == "static" else "motion"
             self.lbl_state.setText(f"Logging {kind} ({elapsed:.1f}s, {len(buf)} samples)")
             return
-        if self._thresh is None:
-            return
-        # 히스테리시스(yaml hysteresis): 정적→동적은 높은 임계, 동적→정적은 낮은 임계로
-        # 경계에서 0/1 진동(튐)을 막는다. 마진 = (동적평균-정적평균) × hysteresis.
-        rng = (self._motion_ref or 0.0) - (self._static_ref or 0.0)
-        margin = self._hyst * rng
-        if self._state == "static":
-            raw = "move" if move > self._thresh + margin else "static"
+        # 3상태 판정: jitter(도플러)>jth → Motion / elif wander(std)>wth → Presence / else Empty.
+        # 히스테리시스: 현재 상태에서 빠져나갈 때는 낮은 임계, 진입할 때는 높은 임계(경계 진동 방지).
+        jth_hi = self._jitter_th * (1 + self._hyst)
+        jth_lo = self._jitter_th * (1 - self._hyst)
+        wth_hi = self._wander_th * (1 + self._hyst)
+        wth_lo = self._wander_th * (1 - self._hyst)
+        if jitter > (jth_lo if self._state == "motion" else jth_hi):
+            raw = "motion"
+        elif wander > (wth_lo if self._state == "presence" else wth_hi):
+            raw = "presence"
         else:
-            raw = "static" if move < self._thresh - margin else "move"
+            raw = "empty"
+        # outlier 필터: 연속 N회 같은 결과여야 확정.
         if raw == self._pending_state:
             self._pending_count += 1
         else:
@@ -433,13 +449,17 @@ class RxTab(QtWidgets.QWidget):
             self._pending_count = 1
         if self._pending_count >= self._outlier_n and raw != self._state:
             self._state = raw
-            self.bridge.state_changed.emit(self.port, self.serial, raw, move)
-            if raw == "move":
-                self.bridge.move_event.emit(self.serial, move)
-        moving = self._state == "move"
+            self.bridge.state_changed.emit(self.port, self.serial, raw, wander)
+            if raw == "motion":
+                self.bridge.move_event.emit(self.serial, jitter)
+        # 3상태 라벨 + 색.
+        info = {"empty": ("⚪ Empty", "#888888"),
+                "presence": ("🔵 Presence", "#4aa3ff"),
+                "motion": ("🟢 Motion", "#2ecc71")}
+        label, color = info[self._state]
         self.lbl_state.setText(
-            f"{'🔴 Motion' if moving else '🟢 Static'}   (variation {move:.2f} / thresh {self._thresh:.2f})")
-        self.lbl_state.setStyleSheet("color:#ff5555;" if moving else "color:#2ecc71;")
+            f"{label}  (w {wander:.2f}/{self._wander_th:.2f}, j {jitter:.0f}/{self._jitter_th:.0f})")
+        self.lbl_state.setStyleSheet(f"color:{color};")
 
     # ---- CSI 갱신 ----
     def on_csi(self, p: dict) -> None:
@@ -514,7 +534,7 @@ class RxTab(QtWidgets.QWidget):
             row += amp                           # amplitude (n_sub)
             row += phase                         # phase (n_sub)
             self._csv_w.writerow(row)
-        self._update_classifier(move)
+        self._update_classifier(self._wander, self._jitter)
 
 
 class MainWindow(QtWidgets.QMainWindow):
