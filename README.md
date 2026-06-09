@@ -173,7 +173,7 @@ CSI 연구에 들어가기 전, 먼저 구매한 ESP32-S3 보드들의 하드웨
 - **2/3단계 스크립트** — 빌드(step01)·CLI 진단(step02)·웹 대시보드(step03) 자동화
 - **문서** — 설치/펌웨어/Python 환경/USB 포트/Espressif 생태계 가이드
 
-### ✅ 완료 (CSI 데이터 획득)
+### ✅ 완료 (CSI 데이터 센싱 & 모션 감지)
 
 - **CSI 통합 수신 펌웨어** — [esp-csi](docs/espressif.md) 기반 `csi_recv` 가 tx 의
   ESP-NOW broadcast CSI 와 라우터(AP) CSI 를 **둘 다** 수집(호스트가 신호원 선택,
@@ -234,6 +234,7 @@ ESP32_WIFI_Loc/
 │   └── board_check/      # 보드 자동 진단 도구 (+ firmware/)
 ├── config/               # 프로젝트 공통 설정 (wifi_config.yaml: 진단+CSI 라우터 공유)
 ├── docs/                 # 설치/환경/하드웨어 세부 문서
+│   └── figures/          #   대시보드 화면(web/GUI) · 실내 HW 배치도
 ├── scripts/              # 보조 스크립트 (csi_flash, csi_app, csi_gui, install_esp_idf 등)
 ├── .github/workflows/    # CI (펌웨어 빌드 + Python lint)
 ├── CLAUDE.md             # Claude Code 작업 가이드라인
