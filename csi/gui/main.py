@@ -112,9 +112,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.wf_img.setColorMap(pg.colormap.get("viridis"))
         except Exception:
             pass
+        self.dop_plot = pg.PlotWidget(title="도플러 스펙트럼 (가로=움직임 주파수 Hz, 세로=세기)")
+        self.dop_curve = self.dop_plot.plot(pen=pg.mkPen("#2ecc71", width=1.5))
         tx_v.addWidget(self.amp_plot)
         tx_v.addWidget(self.phase_plot)
         tx_v.addWidget(self.wf_plot)
+        tx_v.addWidget(self.dop_plot)
         self.tabs.addTab(tx_w, "tx 링크 (rx↔tx)")
 
         # --- rx 신호원 선택 탭 ---
@@ -261,6 +264,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._wf[-1, :] = np.asarray(amp, dtype=np.float32)
         # ImageItem 은 (x=행, y=열) 이므로 그대로: 행=시간, 열=서브캐리어.
         self.wf_img.setImage(self._wf, autoLevels=True)
+
+        # 도플러 스펙트럼: 워터폴(시간×서브캐리어)의 '시간축'을 FFT 해 움직임 주파수를
+        # 본다. 정적 성분(DC, 평균)을 빼 움직임만 남기고, 서브캐리어 평균으로 합친다.
+        # 샘플레이트(fs)는 패킷 rate(Hz). 0Hz 근처=느린 움직임(호흡), 높을수록 빠른 움직임.
+        wf = self._wf - self._wf.mean(axis=0, keepdims=True)
+        spec = np.abs(np.fft.rfft(wf, axis=0)).mean(axis=1)
+        fs = float(p.get("rate") or 0.0) or 50.0
+        freqs = np.fft.rfftfreq(self._wf.shape[0], 1.0 / fs)
+        self.dop_curve.setData(freqs, spec)
 
     def _on_stream_stopped(self, err: object) -> None:
         self._stream_port = None
