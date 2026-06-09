@@ -70,14 +70,17 @@ BASE_DIR = Path(__file__).resolve().parent        # csi/web
 CSI_DIR = BASE_DIR.parent                          # csi
 sys.path.insert(0, str(CSI_DIR / "common"))
 
-import boards as boards_mod   # noqa: E402
-import csi_stream             # noqa: E402
-import flasher                # noqa: E402
-import role_detect            # noqa: E402
-from port_lock import port_lock  # noqa: E402
-from classifier import (        # noqa: E402
-    RxClassifier, vote_room, read_wifi_config, trained_source_for,
+import boards as boards_mod  # noqa: E402
+import csi_stream  # noqa: E402
+import flasher  # noqa: E402
+import role_detect  # noqa: E402
+from classifier import (  # noqa: E402
+    RxClassifier,
+    read_wifi_config,
+    trained_source_for,
+    vote_room,
 )
+from port_lock import port_lock  # noqa: E402
 
 app = FastAPI(title="ESP32 CSI 대시보드")
 STATIC_DIR = BASE_DIR / "static"

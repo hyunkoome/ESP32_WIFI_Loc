@@ -18,13 +18,14 @@ import logging
 from typing import Callable, Dict, List, Optional
 
 import ble_test
-import config
 import esptool_wrapper
 import firmware as firmware_mod
 import peripheral_test
 import psram_test
 import serial_check
 import wifi_test
+
+import config
 
 logger = logging.getLogger("board_check.diagnostics")
 

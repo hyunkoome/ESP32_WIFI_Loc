@@ -38,12 +38,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List, Optional
 
-import config
 import diagnostics
 import esptool_wrapper
 import firmware
 import report
 import usb_detector
+
+import config
 
 try:
     from colorama import Fore, Style

@@ -24,8 +24,9 @@ import json
 import time
 from typing import Callable, Dict, Optional
 
-import config
 from esptool_wrapper import run_esptool
+
+import config
 
 try:
     import serial  # pyserial

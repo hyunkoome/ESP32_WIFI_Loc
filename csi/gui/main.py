@@ -20,17 +20,17 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PyQt5 import QtCore, QtWidgets
 import pyqtgraph as pg
+from PyQt5 import QtCore, QtWidgets
 
 # csi/common 공용 백엔드 import.
 _CSI = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_CSI / "common"))
 
-import boards as boards_mod   # noqa: E402
-import csi_stream             # noqa: E402
-import flasher                # noqa: E402
-import role_detect            # noqa: E402
+import boards as boards_mod  # noqa: E402
+import csi_stream  # noqa: E402
+import flasher  # noqa: E402
+import role_detect  # noqa: E402
 from port_lock import port_lock  # noqa: E402
 
 WF_HISTORY = 120  # 워터폴 시간축 길이(최근 N 패킷)
@@ -602,7 +602,6 @@ class RxTab(QtWidgets.QWidget):
         move_raw = float(recent.std(axis=0).mean())
         # EMA 스무딩(yaml ema_alpha): 짧은 윈도우의 순간 노이즈로 상태가 튀지 않게.
         self._move = (1.0 - self._ema) * self._move + self._ema * move_raw
-        move = self._move
         # reference 차용 + 실측 검증으로 재정의한 두 메트릭:
         #  - motion = 도플러 피크(움직임 주파수 세기). 프레임차분(doppler)은 움직임 구분에
         #    실패했고, 도플러 피크가 빈방<정지<움직임으로 잘 갈렸다(검증 완료).

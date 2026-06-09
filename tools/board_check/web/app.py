@@ -43,10 +43,11 @@ BASE_DIR = Path(__file__).resolve().parent
 PKG_DIR = BASE_DIR.parent
 sys.path.insert(0, str(PKG_DIR))
 
-import config  # noqa: E402
 import diagnostics  # noqa: E402
 import firmware as firmware_mod  # noqa: E402
 import usb_detector  # noqa: E402
+
+import config  # noqa: E402
 
 app = FastAPI(title="ESP32-S3 보드 진단 대시보드")
 STATIC_DIR = BASE_DIR / "static"

@@ -7,10 +7,16 @@
 가만히 vs 움직임에서 두 지표를 비교하면 어느 신호원이 움직임을 잡는지 알 수 있다.
 """
 from __future__ import annotations
-import sys, time, math, threading
+
+import math
+import sys
+import threading
+import time
+from pathlib import Path
+
 import numpy as np
 import serial
-from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent / "analysis"))
 from csi_parser import parse_line
 

@@ -17,8 +17,9 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-import config
 from wifi_test import _rssi_bar  # RSSI 신호막대 시각화 재사용
+
+import config
 
 
 def evaluate_ble(firmware_diag: Optional[Dict[str, object]]) -> Dict[str, object]:
