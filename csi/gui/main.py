@@ -737,6 +737,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._rx_tabs[port] = tab
             self.tabs.addTab(tab, f"rx: {serial[-4:] if serial else port}")
             self.tabs.setCurrentWidget(tab)
+            # 첫 rx 는 WiFi AP(router) 를, 2번째부터는 tx 를 신호원으로 자동 설정.
+            tab.src_combo.setCurrentText("wifi router" if len(self._rx_tabs) == 1 else "tx")
             self._append_log(f"rx tab added: {port} ({serial})")
         elif role != "rx" and port in self._rx_tabs:
             self._remove_rx_tab(port)
