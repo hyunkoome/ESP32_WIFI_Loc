@@ -64,25 +64,56 @@ class Bridge(QtCore.QObject):
 
 
 class SpaceMonitor(QtWidgets.QWidget):
-    """Space Monitoring 탭: rx 별 정적/움직임 상태 종합 + 움직임 이벤트 로그 + 분당 카운트."""
+    """Space Monitoring 탭: rx 별 움직임 상태(1=움직임/0=정적) 시계열 그래프 + 이벤트 로그."""
+
+    _COLORS = ["#4aa3ff", "#ff5555", "#2ecc71", "#f5a623", "#a36bff", "#36d7d7"]
 
     def __init__(self) -> None:
         super().__init__()
         v = QtWidgets.QVBoxLayout(self)
         v.addWidget(QtWidgets.QLabel(
-            "<b>Space Monitoring</b> — rx 별 정적/움직임 상태와 움직임 이벤트를 종합 표시"))
+            "<b>Space Monitoring</b> — per-rx motion state over time (x=time, y=motion 1 / static 0)"))
+        # rx 별 현재 상태 라벨(가로 배치).
         self._state_labels: dict[str, QtWidgets.QLabel] = {}
-        self.state_box = QtWidgets.QVBoxLayout()
+        self.state_box = QtWidgets.QHBoxLayout()
         sw = QtWidgets.QWidget(); sw.setLayout(self.state_box)
         v.addWidget(sw)
-        v.addWidget(QtWidgets.QLabel("움직임 이벤트 로그 (시각 · rx · 변동):"))
+        # 상태 시계열 그래프(rx 별 색상, step). y=0 정적 / 1 움직임.
+        self.plot = pg.PlotWidget()
+        self.plot.setLabel("bottom", "Time (s)")
+        self.plot.setLabel("left", "Motion (1) / Static (0)")
+        self.plot.addLegend(offset=(-10, 10))
+        self.plot.showGrid(x=True, y=True, alpha=0.2)
+        self.plot.setYRange(-0.2, 1.4, padding=0)
+        self.plot.setMouseEnabled(x=False, y=False)
+        v.addWidget(self.plot, 2)
+        self._curves: dict[str, object] = {}
+        self._series: dict[str, tuple[list, list]] = {}
+        self._offset: dict[str, float] = {}
+        self._t0 = time.monotonic()
+        # 움직임 이벤트 로그(축소) + 분당 카운트.
+        v.addWidget(QtWidgets.QLabel("Motion event log (time · rx · variation):"))
         self.event_log = QtWidgets.QPlainTextEdit()
         self.event_log.setReadOnly(True)
-        v.addWidget(self.event_log, 1)
-        self.lbl_count = QtWidgets.QLabel("최근 1분 움직임: 0회")
+        self.event_log.setMaximumHeight(90)
+        v.addWidget(self.event_log)
+        self.lbl_count = QtWidgets.QLabel("Motion in last 1 min: 0")
         fnt = self.lbl_count.font(); fnt.setBold(True); self.lbl_count.setFont(fnt)
         v.addWidget(self.lbl_count)
         self._move_times: list[float] = []
+        # 현재 시각까지 상태선을 연장하는 주기 갱신 타이머(정적 유지도 수평선으로).
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self._redraw_all)
+        self._timer.start(1000)
+
+    def _ensure(self, serial: str) -> None:
+        if serial in self._series:
+            return
+        idx = len(self._curves)
+        self._series[serial] = ([0.0], [0])    # 시작은 정적(0)
+        self._offset[serial] = idx * 0.06      # rx 별 살짝 띄워 겹침 방지(거의 0/1)
+        color = self._COLORS[idx % len(self._COLORS)]
+        self._curves[serial] = self.plot.plot(pen=pg.mkPen(color, width=2), name=serial[-4:])
 
     def on_state(self, port: str, serial: str, state: str, move: float) -> None:
         lbl = self._state_labels.get(serial)
@@ -91,17 +122,43 @@ class SpaceMonitor(QtWidgets.QWidget):
             fnt = lbl.font(); fnt.setPointSize(13); fnt.setBold(True); lbl.setFont(fnt)
             self._state_labels[serial] = lbl
             self.state_box.addWidget(lbl)
+            self.state_box.addSpacing(12)
         moving = state == "move"
-        lbl.setText(f"{serial[-4:]} :  {'🔴 움직임' if moving else '🟢 정적'}   (변동 {move:.2f})")
+        lbl.setText(f"{serial[-4:]}: {'🔴Motion' if moving else '🟢Static'}")
         lbl.setStyleSheet("color:#ff5555;" if moving else "color:#2ecc71;")
+        self._ensure(serial)
+        ts, ss = self._series[serial]
+        now = time.monotonic() - self._t0
+        ts.append(now); ss.append(1 if moving else 0)
+        while len(ts) > 2 and ts[0] < now - 120:   # 최근 120초만 보관
+            ts.pop(0); ss.pop(0)
+        self._redraw(serial)
+
+    def _redraw(self, serial: str) -> None:
+        ts, ss = self._series[serial]
+        off = self._offset[serial]
+        now = time.monotonic() - self._t0
+        xs: list[float] = []
+        ys: list[float] = []
+        for i in range(len(ts)):
+            if i > 0:
+                xs.append(ts[i]); ys.append(ss[i - 1] + off)   # 이전 상태 유지(수평)
+            xs.append(ts[i]); ys.append(ss[i] + off)           # 변화(수직)
+        xs.append(now); ys.append(ss[-1] + off)                # 현재까지 연장
+        self._curves[serial].setData(xs, ys)
+        self.plot.setXRange(max(0.0, now - 60), now, padding=0)
+
+    def _redraw_all(self) -> None:
+        for serial in list(self._series):
+            self._redraw(serial)
 
     def on_move(self, serial: str, move: float) -> None:
         ts = time.strftime("%H:%M:%S")
-        self.event_log.appendPlainText(f"{ts}   [{serial[-4:]}]   움직임 시작 (변동 {move:.2f})")
+        self.event_log.appendPlainText(f"{ts}   [{serial[-4:]}]   Motion (variation {move:.2f})")
         now = time.monotonic()
         self._move_times.append(now)
         self._move_times = [t for t in self._move_times if now - t <= 60]
-        self.lbl_count.setText(f"최근 1분 움직임: {len(self._move_times)}회")
+        self.lbl_count.setText(f"Motion in last 1 min: {len(self._move_times)}")
 
 
 class RxTab(QtWidgets.QWidget):
@@ -137,9 +194,9 @@ class RxTab(QtWidgets.QWidget):
     def _build(self) -> None:
         v = QtWidgets.QVBoxLayout(self)
         row = QtWidgets.QHBoxLayout()
-        row.addWidget(QtWidgets.QLabel("신호원:"))
+        row.addWidget(QtWidgets.QLabel("Source:"))
         self.src_combo = QtWidgets.QComboBox()
-        self.src_combo.addItems(["tx", "wifi router", "all (융합)"])
+        self.src_combo.addItems(["tx", "wifi router", "all (fusion)"])
         self.src_combo.setMinimumWidth(160)
         self.src_combo.currentTextChanged.connect(self._on_src)
         row.addWidget(self.src_combo)
@@ -147,29 +204,29 @@ class RxTab(QtWidgets.QWidget):
         row.addWidget(self.lbl_stats)
         row.addStretch(1)
         # 이 rx 의 실시간 상태 라벨(로깅/학습은 상단 공용 패널에서 모든 rx 동시 수행).
-        self.lbl_state = QtWidgets.QLabel("상태: 학습 전")
+        self.lbl_state = QtWidgets.QLabel("State: not trained")
         fnt = self.lbl_state.font(); fnt.setPointSize(12); fnt.setBold(True)
         self.lbl_state.setFont(fnt)
         row.addWidget(self.lbl_state)
         v.addLayout(row)
 
-        self.amp_plot = pg.PlotWidget(title="진폭 |H| — 서브캐리어별 채널 세기")
-        self.amp_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
-        self.amp_plot.setLabel("left", "진폭 |H|")
+        self.amp_plot = pg.PlotWidget(title="Amplitude |H| — per-subcarrier channel gain")
+        self.amp_plot.setLabel("bottom", "Subcarrier index (= frequency)")
+        self.amp_plot.setLabel("left", "Amplitude |H|")
         self.amp_plot.setMouseEnabled(x=False, y=False)  # 마우스로 축 못 바꾸게(자동 범위 유지)
         self.amp_plot.enableAutoRange()                  # 어떤 라우터/tx 든 데이터에 맞춰 자동
         self.amp_curve = self.amp_plot.plot(pen=pg.mkPen("#4aa3ff", width=1.5))
 
-        self.phase_plot = pg.PlotWidget(title="위상 ∠H — 서브캐리어별 위상")
-        self.phase_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
-        self.phase_plot.setLabel("left", "위상 (rad)")
+        self.phase_plot = pg.PlotWidget(title="Phase ∠H — per-subcarrier phase")
+        self.phase_plot.setLabel("bottom", "Subcarrier index (= frequency)")
+        self.phase_plot.setLabel("left", "Phase (rad)")
         self.phase_plot.setMouseEnabled(x=False, y=False)
         self.phase_plot.setYRange(-3.2, 3.2)
         self.phase_curve = self.phase_plot.plot(pen=pg.mkPen("#f5a623", width=1.5))
 
-        self.wf_plot = pg.PlotWidget(title="워터폴 — 시간에 따른 서브캐리어 진폭(색=진폭)")
-        self.wf_plot.setLabel("bottom", "서브캐리어 인덱스 (= 주파수)")
-        self.wf_plot.setLabel("left", "시간 (프레임, 위=최근)")
+        self.wf_plot = pg.PlotWidget(title="Waterfall — subcarrier amplitude over time (color=amplitude)")
+        self.wf_plot.setLabel("bottom", "Subcarrier index (= frequency)")
+        self.wf_plot.setLabel("left", "Time (frames, top=recent)")
         self.wf_plot.setMouseEnabled(x=False, y=False)
         self.wf_img = pg.ImageItem()
         self.wf_plot.addItem(self.wf_img)
@@ -178,9 +235,9 @@ class RxTab(QtWidgets.QWidget):
         except Exception:
             pass
 
-        self.dop_plot = pg.PlotWidget(title="도플러 스펙트럼 — 진폭 시간변화의 FFT(움직임 주파수)")
-        self.dop_plot.setLabel("bottom", "움직임 주파수 (Hz)")
-        self.dop_plot.setLabel("left", "세기 (FFT 크기)")
+        self.dop_plot = pg.PlotWidget(title="Doppler spectrum — FFT of amplitude over time (motion frequency)")
+        self.dop_plot.setLabel("bottom", "Motion frequency (Hz)")
+        self.dop_plot.setLabel("left", "Magnitude (FFT)")
         # 축 고정: autoRange 로 매 프레임 범위가 출렁이지 않게 가로 0~10Hz, 세로 0~60 고정.
         self.dop_plot.setXRange(0, 10, padding=0)
         self.dop_plot.setYRange(0, 60, padding=0)
@@ -222,22 +279,22 @@ class RxTab(QtWidgets.QWidget):
             self._want_source = "tx"
             # tx 복귀: 라우터 연결을 끊어 ESP-NOW 채널(11)로 돌아간다.
             self._send_q.put("WIFI_DISCONNECT")
-            self.bridge.log.emit(f"[{tag}] WIFI_DISCONNECT → tx(ESP-NOW) 채널 복귀")
+            self.bridge.log.emit(f"[{tag}] WIFI_DISCONNECT → back to tx (ESP-NOW) channel")
         self._wf = None
-        self.bridge.log.emit(f"[{tag}] 신호원 → {self._want_source}")
+        self.bridge.log.emit(f"[{tag}] source → {self._want_source}")
 
     def _send_wifi_connect(self) -> None:
         tag = self.serial[-4:] if self.serial else self.port
         ssid, pw = read_wifi_config()
         if not ssid:
-            ssid, ok = QtWidgets.QInputDialog.getText(self, "라우터 SSID", "라우터 SSID:")
+            ssid, ok = QtWidgets.QInputDialog.getText(self, "Router SSID", "Router SSID:")
             if not ok or not ssid:
                 return
-            pw, ok = QtWidgets.QInputDialog.getText(self, "라우터 비번", f"'{ssid}' 비밀번호:")
+            pw, ok = QtWidgets.QInputDialog.getText(self, "Router password", f"Password for '{ssid}':")
             if not ok:
                 return
         self._send_q.put(csi_stream.wifi_connect_cmd(ssid, pw))
-        self.bridge.log.emit(f"[{tag}] WIFI_CONNECT → \"{ssid}\" (rx 가 라우터 접속 시도)")
+        self.bridge.log.emit(f"[{tag}] WIFI_CONNECT → \"{ssid}\" (rx attempting to connect to router)")
 
     # ---- 정적/동적 로깅 + 학습(분류기) — 상단 공용 패널이 모든 rx 에 동시 호출 ----
     def start_logging(self, mode: str) -> None:
@@ -247,7 +304,7 @@ class RxTab(QtWidgets.QWidget):
             self._static_buf = []
         else:
             self._motion_buf = []
-        self.lbl_state.setText(f"로깅 중({'정적' if mode == 'static' else '동적'})…")
+        self.lbl_state.setText(f"Logging ({'static' if mode == 'static' else 'motion'})…")
         self.lbl_state.setStyleSheet("color:#f5a623;")
 
     def stop_logging(self) -> int:
@@ -257,14 +314,14 @@ class RxTab(QtWidgets.QWidget):
         buf = self._static_buf if self._logging == "static" else self._motion_buf
         done = self._logging
         self._logging = None
-        self.lbl_state.setText(f"{'정적' if done == 'static' else '동적'} 로깅 완료 ({len(buf)}샘플)")
+        self.lbl_state.setText(f"{'Static' if done == 'static' else 'Motion'} logging done ({len(buf)} samples)")
         self.lbl_state.setStyleSheet("color:#888;")
         return 1
 
     def train(self) -> bool:
         """로깅한 정적/동적 데이터로 임계를 학습(분류기 생성) + 파라미터 저장."""
         if not self._static_buf or not self._motion_buf:
-            self.bridge.log.emit(f"[{self.serial[-4:]}] 학습 불가: 정적·동적 둘 다 로깅 필요")
+            self.bridge.log.emit(f"[{self.serial[-4:]}] Cannot train: need both static and motion logging")
             return False
         self._static_ref = sum(self._static_buf) / len(self._static_buf)
         self._motion_ref = sum(self._motion_buf) / len(self._motion_buf)
@@ -277,8 +334,8 @@ class RxTab(QtWidgets.QWidget):
             "thresh": self._thresh, "outlier_n": self._outlier_n,
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         self.bridge.log.emit(
-            f"[{self.serial[-4:]}] 학습완료 정적={self._static_ref:.2f} "
-            f"동적={self._motion_ref:.2f} 임계={self._thresh:.2f}")
+            f"[{self.serial[-4:]}] Trained: static={self._static_ref:.2f} "
+            f"motion={self._motion_ref:.2f} thresh={self._thresh:.2f}")
         return True
 
     def _update_classifier(self, move: float) -> None:
@@ -303,7 +360,7 @@ class RxTab(QtWidgets.QWidget):
                 self.bridge.move_event.emit(self.serial, move)
         moving = self._state == "move"
         self.lbl_state.setText(
-            f"{'🔴 움직임' if moving else '🟢 정적'}   (변동 {move:.2f} / 임계 {self._thresh:.2f})")
+            f"{'🔴 Motion' if moving else '🟢 Static'}   (variation {move:.2f} / thresh {self._thresh:.2f})")
         self.lbl_state.setStyleSheet("color:#ff5555;" if moving else "color:#2ecc71;")
 
     # ---- CSI 갱신 ----
@@ -357,14 +414,14 @@ class RxTab(QtWidgets.QWidget):
         self._move = move
         self.lbl_stats.setText(
             f"[{src}]  rate {p['rate']}  RSSI {p['rssi']}  sub {p['n_sub']}"
-            f"   |   움직임지표(변동) {move:.2f}")
+            f"   |   Motion index (variation) {move:.2f}")
         self._update_classifier(move)
 
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("ESP32 CSI 대시보드 (GUI)")
+        self.setWindowTitle("ESP32 CSI Dashboard (GUI)")
         self.resize(1080, 880)
 
         self.bridge = Bridge()
@@ -392,9 +449,9 @@ class MainWindow(QtWidgets.QMainWindow):
         v = QtWidgets.QVBoxLayout(central)
 
         top = QtWidgets.QHBoxLayout()
-        top.addWidget(QtWidgets.QLabel("<b>연결된 보드</b> · 실시간 감지 · role 자동표시 · rx 마다 탭"))
+        top.addWidget(QtWidgets.QLabel("<b>Connected boards</b> · live detection · auto role · tab per rx"))
         top.addStretch(1)
-        btn_refresh = QtWidgets.QPushButton("🔄 새로고침")
+        btn_refresh = QtWidgets.QPushButton("🔄 Refresh")
         btn_refresh.clicked.connect(self.refresh)
         top.addWidget(btn_refresh)
         v.addLayout(top)
@@ -407,16 +464,22 @@ class MainWindow(QtWidgets.QMainWindow):
         # 분류기 공용 패널(탭 위): 어느 탭에서든 누르면 모든 rx 가 동시에 로깅/학습한다.
         # 로깅 버튼은 토글 — 1번 누르면 시작, 다시 누르면 저장(정적/동적 로깅 시간이 달라도 OK).
         crow = QtWidgets.QHBoxLayout()
-        crow.addWidget(QtWidgets.QLabel("분류기:"))
-        self.btn_log_static = QtWidgets.QPushButton("정적 데이터 로깅 시작")
+        crow.addWidget(QtWidgets.QLabel("Classifier:"))
+        self.btn_log_static = QtWidgets.QPushButton("Log Static Data")
         self.btn_log_static.clicked.connect(lambda: self._do_logging("static"))
-        self.btn_log_motion = QtWidgets.QPushButton("동적 데이터 로깅 시작")
+        self.btn_log_motion = QtWidgets.QPushButton("Log Motion Data")
         self.btn_log_motion.clicked.connect(lambda: self._do_logging("motion"))
-        self.btn_train = QtWidgets.QPushButton("파라미터 학습(분류기)")
+        self.btn_train = QtWidgets.QPushButton("Train Classifier")
         self.btn_train.clicked.connect(self._do_train)
         crow.addWidget(self.btn_log_static)
         crow.addWidget(self.btn_log_motion)
         crow.addWidget(self.btn_train)
+        crow.addSpacing(20)
+        # 현재 모드 표시(대기 / 로깅중 / 학습중 / 실시간 감지중).
+        self.lbl_mode = QtWidgets.QLabel("⏸ Idle")
+        fnt = self.lbl_mode.font(); fnt.setPointSize(13); fnt.setBold(True)
+        self.lbl_mode.setFont(fnt)
+        crow.addWidget(self.lbl_mode)
         crow.addStretch(1)
         v.addLayout(crow)
 
@@ -465,8 +528,8 @@ class MainWindow(QtWidgets.QMainWindow):
             row = QtWidgets.QHBoxLayout()
             row.addWidget(QtWidgets.QLabel(
                 f"{b['port']}  serial={b['serial']}  [{b['vid_pid']}]"
-                + ("" if b["accessible"] else "  ⚠권한없음")))
-            badge = QtWidgets.QLabel("감지중…")
+                + ("" if b["accessible"] else "  ⚠no permission")))
+            badge = QtWidgets.QLabel("Detecting…")
             row.addWidget(badge)
             self._badges[b["port"]] = badge
             row.addStretch(1)
@@ -496,7 +559,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._rx_tabs[port] = tab
             self.tabs.addTab(tab, f"rx: {serial[-4:] if serial else port}")
             self.tabs.setCurrentWidget(tab)
-            self._append_log(f"rx 탭 생성: {port} ({serial})")
+            self._append_log(f"rx tab added: {port} ({serial})")
         elif role != "rx" and port in self._rx_tabs:
             self._remove_rx_tab(port)
 
@@ -509,7 +572,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if idx >= 0:
             self.tabs.removeTab(idx)
         tab.deleteLater()
-        self._append_log(f"rx 탭 제거: {port}")
+        self._append_log(f"rx tab removed: {port}")
 
     def _on_csi(self, port: str, p: dict) -> None:
         tab = self._rx_tabs.get(port)
@@ -519,41 +582,56 @@ class MainWindow(QtWidgets.QMainWindow):
     # ---- 분류기 공용 제어 (모든 rx 동시) ----
     def _do_logging(self, mode: str) -> None:
         if not self._rx_tabs:
-            self._append_log("로깅할 rx 가 없습니다(rx 보드 연결/감지 필요).")
+            self._append_log("No rx to log (connect/detect an rx board first).")
             return
         btn = self.btn_log_static if mode == "static" else self.btn_log_motion
         other = self.btn_log_motion if mode == "static" else self.btn_log_static
-        label = "정적" if mode == "static" else "동적"
+        label = "Static" if mode == "static" else "Motion"
         if self._logging_mode is None:
             # 1번째 클릭: 모든 rx 로깅 시작. 다른 버튼은 비활성(클릭한 버튼만 '저장'으로).
             for tab in self._rx_tabs.values():
                 tab.start_logging(mode)
             self._logging_mode = mode
-            btn.setText(f"⏺ {label} 로깅중 (클릭→완료)")
+            btn.setText(f"⏺ {label} logging (click to finish)")
             other.setEnabled(False)
             self.btn_train.setEnabled(False)
-            self._append_log(f"모든 rx({len(self._rx_tabs)}개) {label} 로깅 시작 — 다시 누르면 완료")
+            self.lbl_mode.setText(f"⏺ Logging {label} data…")
+            self.lbl_mode.setStyleSheet("color:#f5a623;")
+            self._append_log(f"All rx ({len(self._rx_tabs)}) started {label} logging — click again to finish")
         elif self._logging_mode == mode:
             # 2번째 클릭: 로깅 완료(저장). 버튼은 다시 '시작'으로 돌아간다.
             n = sum(tab.stop_logging() for tab in self._rx_tabs.values())
             self._logging_mode = None
-            btn.setText(f"{label} 데이터 로깅 시작")
+            btn.setText(f"Log {label} Data")
             other.setEnabled(True)
             self.btn_train.setEnabled(True)
-            self._append_log(f"{label} 로깅 저장 완료 ({n}개 rx)")
+            self._refresh_mode()
+            self._append_log(f"{label} logging saved ({n} rx)")
 
     def _do_train(self) -> None:
         if not self._rx_tabs:
-            self._append_log("학습할 rx 가 없습니다.")
+            self._append_log("No rx to train.")
             return
+        self.lbl_mode.setText("⚙ Training…")
+        self.lbl_mode.setStyleSheet("color:#4aa3ff;")
         n = sum(1 for tab in self._rx_tabs.values() if tab.train())
-        self._append_log(f"파라미터 학습 완료: {n}/{len(self._rx_tabs)} rx — 이제 실시간 판단을 시작합니다.")
+        self._append_log(f"Training done: {n}/{len(self._rx_tabs)} rx — live detection started.")
+        self._refresh_mode()
+
+    def _refresh_mode(self) -> None:
+        trained = any(t._thresh is not None for t in self._rx_tabs.values())
+        if trained:
+            self.lbl_mode.setText("🟢 Detecting (live)")
+            self.lbl_mode.setStyleSheet("color:#2ecc71;")
+        else:
+            self.lbl_mode.setText("⏸ Idle")
+            self.lbl_mode.setStyleSheet("color:#888;")
 
     # ---- flash ----
     def _flash(self, role: str, port: str) -> None:
         if QtWidgets.QMessageBox.question(
-            self, "flash 확인",
-            f"{port} 에 {role} 펌웨어를 flash할까요?\n(보드의 기존 펌웨어를 덮어씁니다)",
+            self, "Confirm flash",
+            f"Flash {role} firmware to {port}?\n(This overwrites the board's existing firmware)",
         ) != QtWidgets.QMessageBox.Yes:
             return
         # 그 포트의 rx 탭(스트림)이 있으면 멈추고 flash(포트 점유 해제).
@@ -565,7 +643,7 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 with port_lock(port):
                     if not flasher.is_built(role):
-                        self.bridge.flash_line.emit("[build] 펌웨어 빌드(최초, 수 분 소요)...")
+                        self.bridge.flash_line.emit("[build] Building firmware (first time, may take a few minutes)...")
                         rc = flasher.build(role, on_line=lambda l: self.bridge.flash_line.emit(l))
                         if rc != 0:
                             self.bridge.flash_done.emit(port, False)
@@ -573,18 +651,18 @@ class MainWindow(QtWidgets.QMainWindow):
                     rc = flasher.flash(role, port, on_line=lambda l: self.bridge.flash_line.emit(l))
                     self.bridge.flash_done.emit(port, rc == 0)
             except Exception as exc:  # 스레드 예외가 조용히 사라지지 않게 로그로 표면화.
-                self.bridge.flash_line.emit(f"[에러] flash 예외: {exc}")
+                self.bridge.flash_line.emit(f"[error] flash exception: {exc}")
                 self.bridge.flash_done.emit(port, False)
         threading.Thread(target=work, daemon=True).start()
 
     def _on_flash_done(self, port: str, ok: bool) -> None:
-        self._append_log(("✓ flash 완료 " if ok else "✗ flash 실패 ") + port)
+        self._append_log(("✓ flash done " if ok else "✗ flash failed ") + port)
         if ok:
             QtCore.QTimer.singleShot(3000, self.refresh)
 
     def _on_stream_stopped(self, port: str, err: object) -> None:
         if err:
-            self._append_log(f"[{port}] 스트림: {err}")
+            self._append_log(f"[{port}] stream: {err}")
 
     def _append_log(self, line: str) -> None:
         self.log.appendPlainText(line)
