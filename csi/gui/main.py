@@ -34,6 +34,7 @@ import role_detect            # noqa: E402
 from port_lock import port_lock  # noqa: E402
 
 WF_HISTORY = 120  # 워터폴 시간축 길이(최근 N 패킷)
+MOVE_WIN = 20     # 움직임지표(변동) 계산 윈도우(최근 N프레임 ~2초). 짧을수록 판단이 빠름
 
 
 def read_wifi_config() -> tuple[str, str]:
@@ -350,7 +351,9 @@ class RxTab(QtWidgets.QWidget):
 
         # 움직임 지표: 워터폴 진폭의 시간 변동(서브캐리어별 std 평균). 가만히 ~1, 움직이면
         # 2~2.5 로 또렷이 오른다 — 느린 움직임/노이즈에 약한 도플러보다 직관적인 지표.
-        move = float(self._wf.std(axis=0).mean())
+        # 움직임지표는 워터폴 전체(12초)가 아니라 최근 짧은 구간(MOVE_WIN)으로 — 전체면
+        # 움직임이 윈도우에 반영될 때까지 판단이 느리다(체감 3초+ 지연의 원인).
+        move = float(self._wf[-MOVE_WIN:].std(axis=0).mean())
         self._move = move
         self.lbl_stats.setText(
             f"[{src}]  rate {p['rate']}  RSSI {p['rssi']}  sub {p['n_sub']}"
