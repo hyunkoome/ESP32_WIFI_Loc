@@ -8,13 +8,14 @@ UI 구성:
   - 상단: 연결 보드 패널(실시간 감지 · role 자동표시 · tx/rx flash)
   - 탭:
     · "tx 링크 (rx↔tx)" : rx 가 받은 tx 신호의 CSI — 진폭/위상/워터폴 실시간
-    · "rx (신호원 선택)" : tx | wifi router | all 선택. router/all 은 2차(멀티-peer)예정.
+    · "rx (신호원 선택)" : tx | wifi router | all. router 선택 시 WIFI_CONNECT 로 라우터 접속.
   - rx role 이 감지되면 스트림을 **자동 시작**한다(버튼 없이).
 
 실행: scripts/csi_gui.sh  (또는 python csi/gui/main.py)
 """
 from __future__ import annotations
 
+import queue
 import sys
 import threading
 from pathlib import Path
@@ -65,6 +66,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._roles: dict[str, object] = {}
         self._stream_stop = threading.Event()
         self._stream_port: str | None = None     # 현재 스트림 중인 포트
+        self._send_q: "queue.Queue[str] | None" = None  # 보드로 보낼 명령(WIFI_CONNECT)
+        self._want_source = "tx"                 # 신호원 필터: tx | router | all
         self._wf: np.ndarray | None = None          # 워터폴 버퍼
         self._dop_smooth: np.ndarray | None = None  # 도플러 스무딩(EMA) 상태
 
@@ -129,13 +132,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.src_combo = QtWidgets.QComboBox()
         self.src_combo.addItems(["tx", "wifi router", "all (융합)"])
         self.src_combo.setMinimumWidth(180)
+        self.src_combo.currentTextChanged.connect(self._on_src_change)
         row.addWidget(self.src_combo)
         row.addStretch(1)
         rx_v.addLayout(row)
         rx_v.addWidget(QtWidgets.QLabel(
-            "현재(1차)는 <b>tx</b> 링크만 동작합니다. <b>wifi router</b> / <b>all(융합)</b> 은\n"
-            "rx 가 라우터 신호까지 동시에 받는 <b>멀티-peer 펌웨어(2차)</b> 에서 활성화됩니다.\n"
-            "all = tx 링크 + 라우터 링크를 융합해 파형/위치를 추정합니다."
+            "<b>tx</b> = ESP-NOW 송신기 CSI, <b>wifi router</b> = 라우터(AP) CSI.\n"
+            "wifi router 선택 시 cli_wifi_config.yaml(없으면 직접 입력)을 읽어 rx 에\n"
+            "WIFI_CONNECT 를 보냅니다(rx 가 STA 접속+ping → 라우터 CSI). all = 둘 다 표시.\n"
+            "⚠ 라우터 접속 시 그 채널로 고정 — tx 가 다른 채널이면 tx 신호는 끊깁니다."
         ))
         rx_v.addStretch(1)
         self.tabs.addTab(rx_w, "rx (신호원 선택)")
@@ -199,6 +204,45 @@ class MainWindow(QtWidgets.QMainWindow):
         if role == "rx" and self._stream_port is None:
             self._start_stream(port)
 
+    # ---- 신호원 선택 ----
+    def _on_src_change(self, text: str) -> None:
+        if "router" in text:
+            self._want_source = "router"
+            self._send_wifi_connect()
+        elif "all" in text:
+            self._want_source = "all"
+        else:
+            self._want_source = "tx"
+        self._wf = None  # 신호원이 바뀌면 워터폴/도플러 누적을 초기화
+        self._append_log(f"신호원 → {self._want_source}")
+
+    def _read_wifi_config(self) -> tuple[str, str]:
+        """cli_wifi_config.yaml 에서 (ssid, pw). 없으면 ('', '')."""
+        try:
+            import yaml
+            p = Path(__file__).resolve().parents[2] / "tools" / "board_check" / "cli_wifi_config.yaml"
+            cfg = yaml.safe_load(p.read_text()) or {}
+            w = cfg.get("wifi") or {}
+            return str(w.get("ssid") or ""), str(w.get("password") or "")
+        except Exception:
+            return "", ""
+
+    def _send_wifi_connect(self) -> None:
+        """라우터 자격증명을 cli_wifi_config(없으면 입력)에서 얻어 rx 로 WIFI_CONNECT 전송."""
+        if self._send_q is None:
+            self._append_log("라우터 접속: rx 스트림이 먼저 시작돼야 합니다(rx 보드 연결 확인).")
+            return
+        ssid, pw = self._read_wifi_config()
+        if not ssid:
+            ssid, ok = QtWidgets.QInputDialog.getText(self, "라우터 SSID", "라우터 SSID:")
+            if not ok or not ssid:
+                return
+            pw, ok = QtWidgets.QInputDialog.getText(self, "라우터 비번", f"'{ssid}' 비밀번호:")
+            if not ok:
+                return
+        self._send_q.put(csi_stream.wifi_connect_cmd(ssid, pw))
+        self._append_log(f"WIFI_CONNECT 전송 → \"{ssid}\" (rx 가 라우터 접속 시도)")
+
     # ---- flash ----
     def _flash(self, role: str, port: str) -> None:
         if QtWidgets.QMessageBox.question(
@@ -243,16 +287,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self._wf = None
         self.lbl_stream.setText(f"스트림: {port} (자동)")
 
+        self._send_q = queue.Queue()
         def work() -> None:
             with port_lock(port):
-                err = csi_stream.stream_csi(port, ev, lambda d: self.bridge.csi_packet.emit(d))
+                err = csi_stream.stream_csi(
+                    port, ev, lambda d: self.bridge.csi_packet.emit(d), send_q=self._send_q)
             self.bridge.stream_stopped.emit(err)
         threading.Thread(target=work, daemon=True).start()
 
     def _on_csi(self, p: dict) -> None:
+        # 신호원 필터: 선택한 신호원(tx/router)만 표시. all 이면 모두 받는다.
+        src = p.get("source", "tx")
+        if self._want_source != "all" and src != self._want_source:
+            return
         amp = p["amplitude"]
         phase = p["phase"]
-        self.lbl_stats.setText(f"rate: {p['rate']}  RSSI: {p['rssi']}  sub: {p['n_sub']}")
+        self.lbl_stats.setText(f"[{src}] rate: {p['rate']}  RSSI: {p['rssi']}  sub: {p['n_sub']}")
         self.amp_curve.setData(amp)
         self.phase_curve.setData(phase)
         # 워터폴: 시간축으로 진폭을 누적(roll).
