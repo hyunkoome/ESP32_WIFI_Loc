@@ -244,7 +244,7 @@ class RxTab(QtWidgets.QWidget):
         self._dop_smooth: np.ndarray | None = None
         self._dop_ymax = 60.0  # 도플러 세로 상한(피크를 천천히 따라가 출렁임 최소)
         # 정적/움직임 분류기(간단 임계). 학습으로 기준을 잡고 변동지표로 실시간 판단.
-        # 3상태 로깅 버퍼(각 항목은 (wander, jitter) 쌍 리스트).
+        # 3상태 로깅 버퍼(각 항목은 (std, doppler) 쌍 리스트).
         self._log_bufs: dict[str, list] = {"empty": [], "presence": [], "motion": []}
         self._logging: str | None = None       # "empty" | "presence" | "motion" | None
         self._log_start = 0.0                  # 로깅 시작 시각(경과초 표시용)
@@ -252,8 +252,8 @@ class RxTab(QtWidgets.QWidget):
         self._csv_w = None
         self._csv_path: Path | None = None
         self._move = 0.0                       # EMA 스무딩된 움직임지표(변동)
-        self._wander = 0.0                     # presence 메트릭(진폭 std)
-        self._jitter = 0.0                     # motion 메트릭(도플러 피크)
+        self._std = 0.0                     # presence 메트릭(진폭 std)
+        self._doppler = 0.0                     # motion 메트릭(도플러 피크)
         self._state = "empty"                  # 확정 3상태: empty | presence | motion
         self._pending_state = "empty"
         self._pending_count = 0
@@ -264,14 +264,14 @@ class RxTab(QtWidgets.QWidget):
         self._outlier_n = int(mc["outlier_n"])
         self._hyst = float(mc["hysteresis"])
         # 3상태 임계: yaml 디폴트 → rx 별 학습값(있으면)으로 덮어쓴다.
-        self._wander_th = float(mc.get("default_wander_th") or 0.9)
-        self._jitter_th = float(mc.get("default_jitter_th") or 75.0)
+        self._std_th = float(mc.get("default_std_th") or 0.9)
+        self._doppler_th = float(mc.get("default_doppler_th") or 75.0)
         clf = (mc.get("classifiers") or {}).get(serial)
         if isinstance(clf, dict):
-            if clf.get("wander_th") is not None:
-                self._wander_th = float(clf["wander_th"])
-            if clf.get("jitter_th") is not None:
-                self._jitter_th = float(clf["jitter_th"])
+            if clf.get("std_th") is not None:
+                self._std_th = float(clf["std_th"])
+            if clf.get("doppler_th") is not None:
+                self._doppler_th = float(clf["doppler_th"])
         self._send_q: "queue.Queue[str]" = queue.Queue()
         self._stop = threading.Event()
         self._build()
@@ -397,7 +397,7 @@ class RxTab(QtWidgets.QWidget):
         # 딥러닝 학습용 raw: 저장 가능한 값 모두 + 전체 float(반올림 없음).
         # 라벨은 파일명의 mode(static/motion). 가변 길이 꼬리: raw_csi(i/q) → amp → phase.
         self._csv_w.writerow(["t_sec", "source", "mac", "rssi", "rate", "n_sub",
-                              "wander", "jitter", "raw_csi_iq...(2*n_sub) then amp...(n_sub) then phase...(n_sub)"])
+                              "std", "doppler", "raw_csi_iq...(2*n_sub) then amp...(n_sub) then phase...(n_sub)"])
         self._log_start = time.monotonic()
         self.lbl_state.setText(f"Logging ({'static' if mode == 'static' else 'motion'})…")
         self.lbl_state.setStyleSheet("color:#f5a623;")
@@ -421,7 +421,7 @@ class RxTab(QtWidgets.QWidget):
         return 1
 
     def _load_recent(self, mode: str) -> list:
-        """dataset/csi_logs 에서 (mode, serial)의 '가장 최근' CSV 를 로드해 [(wander, jitter)]."""
+        """dataset/csi_logs 에서 (mode, serial)의 '가장 최근' CSV 를 로드해 [(std, doppler)]."""
         d = Path(__file__).resolve().parents[2] / "dataset" / "csi_logs"
         files = sorted(d.glob(f"log_{mode}_{self.serial}_*.csv"))   # 파일명 timestamp 순
         if not files:
@@ -433,7 +433,7 @@ class RxTab(QtWidgets.QWidget):
                 next(rd, None)  # 헤더
                 for row in rd:
                     try:
-                        rows.append((float(row[6]), float(row[7])))  # wander, jitter 컬럼
+                        rows.append((float(row[6]), float(row[7])))  # std, doppler 컬럼
                     except (IndexError, ValueError):
                         pass
         except Exception:
@@ -442,7 +442,7 @@ class RxTab(QtWidgets.QWidget):
 
     def train(self) -> bool:
         """학습: dataset/csi_logs 의 각 상태별 '가장 최근' CSV 로드(없으면 세션 버퍼).
-        wander_th=(Empty,Presence 중간), jitter_th=(Presence,Motion 중간). yaml 갱신.
+        std_th=(Empty,Presence 중간), doppler_th=(Presence,Motion 중간). yaml 갱신.
         Presence 가 없으면 Empty/Motion 으로 추정."""
         e = self._load_recent("empty") or self._log_bufs["empty"]
         p = self._load_recent("presence") or self._log_bufs["presence"]
@@ -455,47 +455,47 @@ class RxTab(QtWidgets.QWidget):
         mj = [j for _, j in m]
         if p:
             pw = [w for w, _ in p]; pj = [j for _, j in p]
-            self._wander_th = (mean(ew) + mean(pw)) / 2.0     # Empty vs Presence
-            self._jitter_th = (mean(pj) + mean(mj)) / 2.0     # Presence vs Motion
+            self._std_th = (mean(ew) + mean(pw)) / 2.0     # Empty vs Presence
+            self._doppler_th = (mean(pj) + mean(mj)) / 2.0     # Presence vs Motion
         else:
-            self._wander_th = max(ew) * (1 + self._hyst)      # Presence 없으면 Empty 초과로
-            self._jitter_th = (max(ej) + mean(mj)) / 2.0
+            self._std_th = max(ew) * (1 + self._hyst)      # Presence 없으면 Empty 초과로
+            self._doppler_th = (max(ej) + mean(mj)) / 2.0
         def _stats(buf):
             if not buf:
                 return None
             ws = [w for w, _ in buf]; js = [j for _, j in buf]
-            return {"wander_mean": sum(ws) / len(ws), "wander_max": max(ws),
-                    "jitter_mean": sum(js) / len(js), "jitter_max": max(js)}
+            return {"std_mean": sum(ws) / len(ws), "std_max": max(ws),
+                    "doppler_mean": sum(js) / len(js), "doppler_max": max(js)}
         save_motion_classifier(self.serial, {
             "source": self._want_source,
-            "wander_th": float(self._wander_th),   # presence 경계(Empty↔Presence)
-            "jitter_th": float(self._jitter_th),   # motion 경계(Presence↔Motion)
+            "std_th": float(self._std_th),   # presence 경계(Empty↔Presence)
+            "doppler_th": float(self._doppler_th),   # motion 경계(Presence↔Motion)
             "empty": _stats(e),
             "presence": _stats(p),
             "motion": _stats(m),
         })
         self.bridge.log.emit(
-            f"[{self.serial[-4:]}] Trained: wander_th={self._wander_th:.2f} "
-            f"jitter_th={self._jitter_th:.1f} → motion_detection.yaml")
+            f"[{self.serial[-4:]}] Trained: std_th={self._std_th:.2f} "
+            f"doppler_th={self._doppler_th:.1f} → motion_detection.yaml")
         return True
 
-    def _update_classifier(self, wander: float, jitter: float) -> None:
-        # 로깅 중이면 (wander, jitter) 쌍을 버퍼에 수집 + 경과시간/샘플수 표시.
+    def _update_classifier(self, std: float, doppler: float) -> None:
+        # 로깅 중이면 (std, doppler) 쌍을 버퍼에 수집 + 경과시간/샘플수 표시.
         if self._logging:
             buf = self._log_bufs[self._logging]
-            buf.append((wander, jitter))
+            buf.append((std, doppler))
             elapsed = time.monotonic() - self._log_start
             self.lbl_state.setText(f"Logging {self._logging} ({elapsed:.1f}s, {len(buf)} samples)")
             return
-        # 3상태 판정: jitter(도플러)>jth → Motion / elif wander(std)>wth → Presence / else Empty.
+        # 3상태 판정: doppler(도플러)>jth → Motion / elif std(std)>wth → Presence / else Empty.
         # 히스테리시스: 현재 상태에서 빠져나갈 때는 낮은 임계, 진입할 때는 높은 임계(경계 진동 방지).
-        jth_hi = self._jitter_th * (1 + self._hyst)
-        jth_lo = self._jitter_th * (1 - self._hyst)
-        wth_hi = self._wander_th * (1 + self._hyst)
-        wth_lo = self._wander_th * (1 - self._hyst)
-        if jitter > (jth_lo if self._state == "motion" else jth_hi):
+        jth_hi = self._doppler_th * (1 + self._hyst)
+        jth_lo = self._doppler_th * (1 - self._hyst)
+        wth_hi = self._std_th * (1 + self._hyst)
+        wth_lo = self._std_th * (1 - self._hyst)
+        if doppler > (jth_lo if self._state == "motion" else jth_hi):
             raw = "motion"
-        elif wander > (wth_lo if self._state == "presence" else wth_hi):
+        elif std > (wth_lo if self._state == "presence" else wth_hi):
             raw = "presence"
         else:
             raw = "empty"
@@ -507,16 +507,16 @@ class RxTab(QtWidgets.QWidget):
             self._pending_count = 1
         if self._pending_count >= self._outlier_n and raw != self._state:
             self._state = raw
-            self.bridge.state_changed.emit(self.port, self.serial, raw, wander)
+            self.bridge.state_changed.emit(self.port, self.serial, raw, std)
             if raw == "motion":
-                self.bridge.move_event.emit(self.serial, jitter)
+                self.bridge.move_event.emit(self.serial, doppler)
         # 3상태 라벨 + 색.
         info = {"empty": ("⚪ Empty", "#888888"),
                 "presence": ("🔵 Presence", "#4aa3ff"),
                 "motion": ("🟢 Motion", "#2ecc71")}
         label, color = info[self._state]
         self.lbl_state.setText(
-            f"{label}  (w {wander:.2f}/{self._wander_th:.2f}, j {jitter:.0f}/{self._jitter_th:.0f})")
+            f"{label}  (w {std:.2f}/{self._std_th:.2f}, j {doppler:.0f}/{self._doppler_th:.0f})")
         self.lbl_state.setStyleSheet(f"color:{color};")
 
     # ---- CSI 갱신 ----
@@ -572,27 +572,27 @@ class RxTab(QtWidgets.QWidget):
         self._move = (1.0 - self._ema) * self._move + self._ema * move_raw
         move = self._move
         # reference 차용 + 실측 검증으로 재정의한 두 메트릭:
-        #  - motion = 도플러 피크(움직임 주파수 세기). 프레임차분(jitter)은 움직임 구분에
+        #  - motion = 도플러 피크(움직임 주파수 세기). 프레임차분(doppler)은 움직임 구분에
         #    실패했고, 도플러 피크가 빈방<정지<움직임으로 잘 갈렸다(검증 완료).
-        #  - presence = wander(전체 진폭 std). 사람 유무(호흡/멀티패스 변화)에 반응.
-        jitter_raw = float(self._dop_smooth.max()) if self._dop_smooth is not None else 0.0
-        wander_raw = float(self._wf.std(axis=0).mean())
-        self._jitter = (1.0 - self._ema) * self._jitter + self._ema * jitter_raw
-        self._wander = (1.0 - self._ema) * self._wander + self._ema * wander_raw
+        #  - presence = std(전체 진폭 std). 사람 유무(호흡/멀티패스 변화)에 반응.
+        doppler_raw = float(self._dop_smooth.max()) if self._dop_smooth is not None else 0.0
+        std_raw = float(self._wf.std(axis=0).mean())
+        self._doppler = (1.0 - self._ema) * self._doppler + self._ema * doppler_raw
+        self._std = (1.0 - self._ema) * self._std + self._ema * std_raw
         self.lbl_stats.setText(
             f"[{src}] rate {p['rate']} RSSI {p['rssi']}  |  "
-            f"wander(presence) {self._wander:.2f}   jitter(motion) {self._jitter:.2f}")
-        # 로깅 중이면 raw 데이터(타임스탬프+wander+jitter+진폭)를 CSV 에 기록.
+            f"std(presence) {self._std:.2f}   doppler(motion) {self._doppler:.2f}")
+        # 로깅 중이면 raw 데이터(타임스탬프+std+doppler+진폭)를 CSV 에 기록.
         if self._logging and self._csv_w is not None:
             t = time.monotonic() - self._log_start
             # 저장 가능한 값 모두 + 전체 float(csv.writer 가 str(value) 로 반올림 없이 기록).
             row = [t, p.get("source", ""), p.get("mac", ""), p["rssi"],
-                   p.get("rate", 0.0), len(amp), self._wander, self._jitter]
+                   p.get("rate", 0.0), len(amp), self._std, self._doppler]
             row += list(p.get("raw_csi", []))   # raw CSI i/q 원본(2*n_sub)
             row += amp                           # amplitude (n_sub)
             row += phase                         # phase (n_sub)
             self._csv_w.writerow(row)
-        self._update_classifier(self._wander, self._jitter)
+        self._update_classifier(self._std, self._doppler)
 
 
 class MainWindow(QtWidgets.QMainWindow):
